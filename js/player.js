@@ -1,8 +1,11 @@
 import { h, icon, clock, sheet, errToast, runtime } from './ui.js';
-import { signedUrl, lazyImg } from './api.js';
+import { sb, signedUrl, lazyImg } from './api.js';
+import { uid } from './ui.js';
 import { episodesOf, nextEpisode, saveProgress, progressOf, ratio } from './catalog.js';
 
 const SPEEDS = [1, 1.25, 1.5, 0.75];
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const INTRO_FRESH = 8000; // durée d'affichage du bouton « Passer l'intro » sans toucher l'écran
 
 export function openPlayer({ title: t, episode = null, start = 0, onExit = null }) {
   let ep = episode;
@@ -29,8 +32,21 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   const speedBtn = h('button', { onclick: () => { speedIdx = (speedIdx + 1) % SPEEDS.length; video.playbackRate = SPEEDS[speedIdx]; speedBtn.lastChild.textContent = `Vitesse (${String(SPEEDS[speedIdx]).replace('.', ',')}x)`; } }, icon('speed'), h('span', {}, 'Vitesse (1x)'));
   const epsBtn = h('button', { class: t.kind === 'series' ? '' : 'hidden', onclick: () => episodesSheet() }, icon('episodes'), 'Épisodes');
   const nextBtn = h('button', { class: 'hidden', onclick: () => goNext() }, icon('nextep'), 'Épisode suivant');
-  const fsBtn = h('button', { onclick: () => fullscreen() }, icon('fullscreen'));
-  const skipIntro = h('button', { class: 'skip-intro hidden', onclick: (e) => { e.stopPropagation(); video.currentTime = cur().intro_end; } }, 'Passer l\'intro');
+  // Sur iPhone, le plein écran natif masquerait nos boutons : on propose un zoom (remplir l'écran) à la place
+  const fsBtn = isIOS
+    ? h('button', { title: 'Remplir l\'écran', onclick: () => { root.classList.toggle('zoomed'); fsBtn.classList.toggle('on', root.classList.contains('zoomed')); } }, icon('zoom'))
+    : h('button', { title: 'Plein écran', onclick: () => fullscreen() }, icon('fullscreen'));
+  let savedVol = 1;
+  try { savedVol = Math.min(1, Math.max(0, parseFloat(localStorage.getItem('blourr-vol') ?? '1'))); } catch { /* rien */ }
+  const muteBtn = h('button', { title: 'Son', onclick: () => { video.muted = !video.muted; if (!video.muted && video.volume === 0) video.volume = 0.5; volUI(); } }, icon('volume'));
+  const volRange = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: savedVol, oninput: () => { video.volume = +volRange.value; video.muted = +volRange.value === 0; volUI(); try { localStorage.setItem('blourr-vol', volRange.value); } catch { /* rien */ } } });
+  const volBox = h('div', { class: 'pl-vol' }, muteBtn, isIOS ? null : volRange);
+  function volUI() {
+    muteBtn.replaceChildren(icon(video.muted || video.volume === 0 ? 'mute' : 'volume'));
+    if (!isIOS) volRange.value = video.muted ? 0 : video.volume;
+  }
+  const skipIntro = h('button', { class: 'skip-intro hidden', onclick: (e) => { e.stopPropagation(); video.currentTime = cur().intro_end; skipIntro.classList.add('hidden'); } }, h('i', { class: 'fill' }), h('span', {}, 'Passer l\'intro'));
+  let introSeenAt = 0;
   const nextUp = h('div', { class: 'next-up hidden' });
   const loading = h('div', { class: 'pl-loading' }, h('div', { class: 'spinner' }));
   const flashL = h('div', { class: 'seek-flash l' }, '−10 s');
@@ -44,11 +60,14 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
       h('button', { class: 'sk', onclick: (e) => { e.stopPropagation(); seekBy(10); } }, icon('fwd10'))),
     h('div', { class: 'pl-bot' },
       h('div', { class: 'pl-seek' }, elapsed, track, remain),
-      h('div', { class: 'pl-btns' }, speedBtn, epsBtn, subBtn, h('div', { class: 'sp' }), nextBtn, fsBtn)));
+      h('div', { class: 'pl-btns' }, volBox, speedBtn, epsBtn, subBtn, h('div', { class: 'sp' }), nextBtn, fsBtn)));
 
   const root = h('div', { class: 'player' }, video, flashL, flashR, loading, ui, skipIntro, nextUp);
   document.body.append(root);
   document.body.style.overflow = 'hidden';
+  if (!isIOS) video.volume = savedVol;
+  video.addEventListener('volumechange', volUI);
+  volUI();
 
   const cur = () => (ep || t);
 
@@ -56,6 +75,9 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   async function load(e, from) {
     ep = e;
     clearCountdown();
+    flushSession();
+    session = { id: uid(), secs: 0, saved: 0 };
+    introSeenAt = 0; skipIntro.classList.add('hidden');
     nextUp.classList.add('hidden');
     loading.classList.remove('hidden');
     ttl.replaceChildren(t.name, ep ? h('small', {}, `  S${ep.season}:É${ep.number} « ${ep.name || 'Épisode ' + ep.number} »`) : null);
@@ -174,8 +196,18 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     elapsed.textContent = clock(c);
     remain.textContent = '-' + clock(d - c);
     const it = cur();
-    const inIntro = it.intro_end && c >= (it.intro_start || 0) && c < it.intro_end - 1;
-    skipIntro.classList.toggle('hidden', !inIntro);
+    const inIntro = it.intro_end != null && it.intro_end > 0 && c >= (it.intro_start || 0) && c < it.intro_end - 1;
+    if (!inIntro) { skipIntro.classList.add('hidden'); introSeenAt = 0; }
+    else {
+      if (!introSeenAt) {
+        introSeenAt = Date.now();
+        skipIntro.classList.remove('hidden', 'stale', 'fresh');
+        void skipIntro.offsetWidth; // relance l'animation
+        skipIntro.classList.add('fresh');
+      }
+      // après 8 s, le bouton ne reste visible que lorsque les commandes sont affichées
+      skipIntro.classList.toggle('stale', Date.now() - introSeenAt > INTRO_FRESH);
+    }
     if (ep && d && d - c < 25 && nextEpisode(ep)) showNextUp(false); else if (!countdown) nextUp.classList.add('hidden');
     if (Date.now() - lastSave > 10000) persist();
   });
@@ -188,6 +220,19 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     loading.classList.add('hidden');
     if (video.error && video.src) errToast('Lecture impossible. Format non pris en charge (utilise du MP4 H.264) ou lien expiré.');
   });
+
+  // ---------- Suivi du temps de visionnage (visible par l'admin) ----------
+  let session = null;
+  const tick = setInterval(() => {
+    if (!session || video.paused || video.seeking || video.readyState < 3) return;
+    session.secs++;
+    if (session.secs - session.saved >= 20) flushSession();
+  }, 1000);
+  function flushSession() {
+    if (!session || session.secs === session.saved || session.secs < 5) return;
+    session.saved = session.secs;
+    sb.from('watch_sessions').upsert({ id: session.id, title_id: t.id, episode_id: ep ? ep.id : null, seconds: session.secs, last_seen: new Date().toISOString() }).then(() => {}, () => {});
+  }
 
   function persist(finished = false) {
     if (!video.duration || !cur().video_key) return;
@@ -229,7 +274,6 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   }
 
   function episodesSheet() {
-    video.pause();
     const eps = episodesOf(t.id).filter((e) => e.video_key);
     const seasons = [...new Set(eps.map((e) => e.season))];
     let s = ep?.season || seasons[0];
@@ -279,7 +323,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     else if (e.key === 'Escape' && !document.fullscreenElement) exit();
   };
   document.addEventListener('keydown', onKey);
-  const onHide = () => { if (document.visibilityState === 'hidden') persist(); };
+  const onHide = () => { if (document.visibilityState === 'hidden') { persist(); flushSession(); } };
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', persist);
 
@@ -287,6 +331,8 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     if (closed) return;
     closed = true;
     persist();
+    flushSession();
+    clearInterval(tick);
     clearCountdown();
     video.pause();
     video.removeAttribute('src'); video.load();

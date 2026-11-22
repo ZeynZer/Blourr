@@ -1,5 +1,5 @@
-import { h, icon, errToast, runtime } from './ui.js';
-import { state, lazyImg, bgInto } from './api.js';
+import { h, icon, errToast, toast, runtime, avatar, confirmBox, dateFr } from './ui.js';
+import { sb, state, lazyImg, bgInto } from './api.js';
 import { cat, loadCatalog, titleById, sagaById, episodesOf, sagaTitles, progressOf, ratio, resumeTarget, continueWatching, toggleList, isPlayable } from './catalog.js';
 import { openPlayer } from './player.js';
 import { go } from './router.js';
@@ -57,8 +57,9 @@ function topBar(active) {
   const bar = h('div', { class: 'cine-top' },
     h('div', { class: 'brand', onclick: () => go('#/cine'), style: { cursor: 'pointer' } }, h('span', { class: 'b-short' }, 'B'), h('span', { class: 'b-long' }, 'BLOURR')),
     h('div', { class: 'links' },
-      [['series', 'Séries'], ['films', 'Films'], ['liste', 'Ma liste']].map(([k, l]) =>
-        h('button', { class: active === k ? 'active' : '', onclick: () => go(active === k ? '#/cine' : '#/cine/' + k) }, l))),
+      [['series', 'Séries'], ['films', 'Films'], ['liste', 'Ma liste'], ['demandes', 'Demandes']].map(([k, l]) =>
+        h('button', { class: (active === k ? 'active' : '') + (k === 'demandes' ? ' l-req' : ''), onclick: () => go(active === k ? '#/cine' : '#/cine/' + k) }, l))),
+    h('button', { class: 'icon-btn plain only-mobile' + (active === 'demandes' ? ' on' : ''), title: 'Demandes', onclick: () => go('#/cine/demandes') }, icon('bulb')),
     h('button', { class: 'icon-btn plain', title: 'Rechercher', onclick: () => go('#/cine/recherche') }, icon('search')),
     state.isAdmin ? h('button', { class: 'icon-btn plain', title: 'Studio', onclick: () => go('#/studio') }, icon('settings')) : null);
   const onScroll = () => bar.classList.toggle('solid', window.scrollY > 40);
@@ -92,6 +93,7 @@ export function cineView(sub = []) {
   const mode = sub[0] || 'home';
   if (mode === 'recherche') return searchView();
   if (mode === 'saga') return sagaView(sub[1]);
+  if (mode === 'demandes') return requestsView();
   const root = h('div', { class: 'view cine' });
   const top = topBar(mode);
   const body = h('div', {}, h('div', { class: 'center-load', style: { minHeight: '80vh' } }, h('div', { class: 'spinner' })));
@@ -344,4 +346,95 @@ function episodesBlock(t, closeDetail) {
   return h('div', { class: 'd-section' },
     h('div', { class: 'd-section-h' }, h('h4', {}, 'Épisodes'), seasons.length > 1 ? sel : h('span', { class: 'muted' }, `Saison ${current}`)),
     list);
+}
+
+// ======================================================================
+// Demandes d'ajout (avec likes)
+// ======================================================================
+const KIND_LABEL = { movie: 'Film', series: 'Série', anime: 'Anime' };
+function requestsView() {
+  const root = h('div', { class: 'view cine' });
+  const top = topBar('demandes');
+  let tab = 'pending';
+  const list = h('div');
+  const titleIn = h('input', { class: 'input', placeholder: 'Titre du film, de la série ou de l\'anime', maxlength: 120 });
+  const kindSel = h('select', { class: 'select', style: { width: '120px', flex: 'none' } }, Object.entries(KIND_LABEL).map(([k, l]) => h('option', { value: k }, l)));
+  const noteIn = h('input', { class: 'input', placeholder: 'Précision (saison, version…) — facultatif', maxlength: 300, style: { marginTop: '8px' } });
+  const send = h('button', { class: 'btn primary block', style: { marginTop: '10px' } }, icon('plus'), 'Proposer');
+  const tabs = h('div', { class: 'req-tabs' });
+  root.append(top,
+    h('div', { style: { height: 'calc(var(--safe-t) + 70px)' } }),
+    h('div', { class: 'sec-h' }, 'Demandes d\'ajout'),
+    h('p', { class: 'muted small', style: { padding: '0 16px', margin: '-4px 0 14px' } }, 'Propose un film ou une série, et like les idées des autres : les plus demandés passent en premier.'),
+    h('div', { class: 'req-form' }, h('div', { class: 'row' }, titleIn, kindSel), noteIn, send),
+    tabs, list);
+  root.cleanup = () => top.cleanup();
+
+  send.onclick = async () => {
+    const title = titleIn.value.trim();
+    if (!title) return errToast('Écris un titre.');
+    send.disabled = true;
+    try {
+      const { data, error } = await sb.from('requests').insert({ title, kind: kindSel.value, note: noteIn.value.trim() || null }).select().single();
+      if (error) throw error;
+      await sb.from('request_votes').insert({ request_id: data.id });
+      titleIn.value = ''; noteIn.value = '';
+      toast('Demande envoyée');
+      tab = 'pending'; load();
+    } catch (e) { errToast(e); } finally { send.disabled = false; }
+  };
+
+  async function load() {
+    const { data, error } = await sb.from('requests')
+      .select('*, author:profiles(id, display_name, color), votes:request_votes(user_id)')
+      .order('created_at', { ascending: false });
+    if (error) { list.replaceChildren(h('p', { class: 'muted', style: { padding: '0 16px' } }, error.message)); return; }
+    const counts = { pending: 0, added: 0, refused: 0 };
+    data.forEach((r) => counts[r.status]++);
+    tabs.replaceChildren(...[['pending', 'En attente'], ['added', 'Ajoutés'], ['refused', 'Refusés']].map(([k, l]) =>
+      h('button', { class: 'chip' + (tab === k ? ' active' : ''), onclick: () => { tab = k; load(); } }, `${l} (${counts[k]})`)));
+    const shown = data.filter((r) => r.status === tab).sort((a, b) => b.votes.length - a.votes.length || new Date(b.created_at) - new Date(a.created_at));
+    if (!shown.length) {
+      list.replaceChildren(h('div', { class: 'empty', style: { padding: '30px' } }, h('p', {}, tab === 'pending' ? 'Aucune demande en attente.' : 'Rien ici pour l\'instant.')));
+      return;
+    }
+    list.replaceChildren(...shown.map((r) => {
+      const mine = r.votes.some((v) => v.user_id === state.profile.id);
+      const likeBtn = h('button', { class: 'like' + (mine ? ' on' : ''), disabled: r.status !== 'pending', onclick: async () => {
+        try {
+          if (mine) await sb.from('request_votes').delete().eq('request_id', r.id).eq('user_id', state.profile.id);
+          else await sb.from('request_votes').insert({ request_id: r.id });
+          load();
+        } catch (e) { errToast(e); }
+      } }, icon(mine ? 'heartf' : 'heart'), String(r.votes.length));
+      const canDelete = state.isAdmin || r.user_id === state.profile.id;
+      const setStatus = async (status) => {
+        const { error: e2 } = await sb.from('requests').update({ status }).eq('id', r.id);
+        if (e2) return errToast(e2);
+        toast(status === 'added' ? 'Marqué comme ajouté' : status === 'refused' ? 'Demande refusée' : 'Remis en attente');
+        load();
+      };
+      return h('div', { class: 'req' },
+        avatar(r.author),
+        h('div', { class: 'meta' },
+          h('b', {}, r.title, h('span', { class: 'kind' }, KIND_LABEL[r.kind] || r.kind),
+            r.status !== 'pending' ? h('span', { class: 'status-pill ' + r.status, style: { marginLeft: '6px' } }, r.status === 'added' ? 'Ajouté' : 'Refusé') : null),
+          h('div', { class: 'sub' }, `par ${r.author?.display_name || 'un ancien membre'} · ${dateFr(r.created_at)}`),
+          r.note ? h('div', { class: 'note' }, r.note) : null,
+          state.isAdmin || canDelete ? h('div', { class: 'adm' },
+            state.isAdmin && r.status !== 'added' ? h('button', { onclick: () => setStatus('added') }, '✓ Ajouté') : null,
+            state.isAdmin && r.status !== 'refused' ? h('button', { onclick: () => setStatus('refused') }, 'Refuser') : null,
+            state.isAdmin && r.status !== 'pending' ? h('button', { onclick: () => setStatus('pending') }, 'Remettre en attente') : null,
+            state.isAdmin && r.status === 'pending' ? h('button', { onclick: () => go('#/studio/t/new/' + (r.kind === 'movie' ? 'movie' : 'series')) }, '+ Ajouter au Studio') : null,
+            canDelete ? h('button', { style: { color: 'var(--danger)' }, onclick: async () => {
+              if (!(await confirmBox('Supprimer cette demande ?', '', 'Supprimer'))) return;
+              const { error: e3 } = await sb.from('requests').delete().eq('id', r.id);
+              if (e3) return errToast(e3);
+              load();
+            } }, 'Supprimer') : null) : null),
+        likeBtn);
+    }));
+  }
+  load();
+  return root;
 }

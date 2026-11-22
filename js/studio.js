@@ -1,4 +1,4 @@
-import { h, icon, toast, errToast, sheet, confirmBox, bytes, runtime, clock, parseClock, uid, ext } from './ui.js';
+import { h, icon, toast, errToast, sheet, confirmBox, bytes, runtime, clock, parseClock, uid, ext, avatar, dateFr } from './ui.js';
 import { sb, state, lazyImg, bgInto, putUrls, putFile, removeKeys } from './api.js';
 import { cat, loadCatalog, titleById, episodesOf, sagaTitles } from './catalog.js';
 import { resizeImage, videoInfo, toVtt, guessName, parseEpisode, episodeName } from './media.js';
@@ -51,6 +51,7 @@ export function studioView(sub = []) {
   if (!state.isAdmin) { go('#/cine', true); return h('div'); }
   if (sub[0] === 't') return titleEditor(sub[1] === 'new' ? null : sub[1], sub[2]);
   if (sub[0] === 'sagas') return sagasView();
+  if (sub[0] === 'activite') return activityView();
   const root = h('div', { class: 'view cine studio' });
   const body = h('div', {}, h('div', { class: 'center-load' }, h('div', { class: 'spinner' })));
   root.append(header('Studio', '#/cine'), body);
@@ -61,7 +62,8 @@ export function studioView(sub = []) {
       h('div', { class: 'row', style: { padding: '0 16px 16px', flexWrap: 'wrap' } },
         h('button', { class: 'btn primary grow', onclick: () => go('#/studio/t/new/movie') }, icon('plus'), 'Film'),
         h('button', { class: 'btn primary grow', onclick: () => go('#/studio/t/new/series') }, icon('plus'), 'Série'),
-        h('button', { class: 'btn grow', onclick: () => go('#/studio/sagas') }, icon('layers'), 'Sagas')),
+        h('button', { class: 'btn grow', onclick: () => go('#/studio/sagas') }, icon('layers'), 'Sagas'),
+        h('button', { class: 'btn grow', onclick: () => go('#/studio/activite') }, icon('chart'), 'Activité')),
       state.configured === false ? h('div', { class: 'banner' }, icon('cloud'), h('div', {}, 'Configure d\'abord le stockage dans ', h('a', { href: '#/profil', style: { textDecoration: 'underline' } }, 'Profil'), '.')) : null,
       cat.titles.length ? null : h('div', { class: 'empty' }, h('div', { class: 'em-ic' }, icon('film')), h('h3', {}, 'Rien pour l\'instant'), h('p', {}, 'Ajoute ton premier film ou ta première série.')),
       cat.titles.map((t) => {
@@ -514,4 +516,114 @@ function editSaga(s) {
       } }, icon('trash'), 'Supprimer la saga') : null,
     ], { onClose: () => resolve(result) });
   });
+}
+
+// ======================================================================
+// Activité : qui regarde quoi, et combien de temps
+// ======================================================================
+function dur(sec) {
+  sec = Math.round(sec || 0);
+  if (sec < 60) return `${sec} s`;
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+}
+function ago(d) {
+  const s = (Date.now() - new Date(d).getTime()) / 1000;
+  if (s < 90) return 'à l\'instant';
+  if (s < 3600) return `il y a ${Math.round(s / 60)} min`;
+  if (s < 86400) return `il y a ${Math.round(s / 3600)} h`;
+  if (s < 7 * 86400) return `il y a ${Math.round(s / 86400)} j`;
+  return dateFr(d);
+}
+
+function activityView() {
+  const root = h('div', { class: 'view cine studio' });
+  const body = h('div', {}, h('div', { class: 'center-load' }, h('div', { class: 'spinner' })));
+  root.append(header('Activité', '#/studio'), body);
+  let range = 7;
+  let timer = null;
+
+  async function load() {
+    try {
+      await loadCatalog();
+      const since = new Date(Date.now() - range * 86400000).toISOString();
+      const [{ data: sessions, error }, { data: profiles }] = await Promise.all([
+        sb.from('watch_sessions').select('*').gte('last_seen', since).order('last_seen', { ascending: false }).limit(1000),
+        sb.from('profiles').select('*').order('created_at'),
+      ]);
+      if (error) throw error;
+      const prof = Object.fromEntries((profiles || []).map((p) => [p.id, p]));
+      const label = (x) => {
+        const t = titleById(x.title_id);
+        const e = x.episode_id && episodesOf(x.title_id).find((y) => y.id === x.episode_id);
+        return { t, e, text: (t?.name || 'Titre supprimé') + (e ? ` · S${e.season}:É${e.number}` : '') };
+      };
+      const live = sessions.filter((x) => Date.now() - new Date(x.last_seen).getTime() < 75000);
+      const liveUsers = new Set();
+
+      // Totaux par membre
+      const per = {};
+      for (const x of sessions) {
+        const o = per[x.user_id] = per[x.user_id] || { secs: 0, last: x.last_seen, titles: {} };
+        o.secs += x.seconds;
+        if (x.last_seen > o.last) o.last = x.last_seen;
+        o.titles[x.title_id] = (o.titles[x.title_id] || 0) + x.seconds;
+      }
+      // Titres les plus regardés
+      const perTitle = {};
+      for (const x of sessions) {
+        const o = perTitle[x.title_id] = perTitle[x.title_id] || { secs: 0, users: new Set() };
+        o.secs += x.seconds; o.users.add(x.user_id);
+      }
+
+      body.replaceChildren(
+        h('div', { class: 'req-tabs' }, [[1, 'Aujourd\'hui'], [7, '7 jours'], [30, '30 jours']].map(([d, l]) =>
+          h('button', { class: 'chip' + (range === d ? ' active' : ''), onclick: () => { range = d; load(); } }, l))),
+
+        h('div', { class: 'sec-h' }, 'En ce moment'),
+        live.length ? live.filter((x) => !liveUsers.has(x.user_id) && liveUsers.add(x.user_id)).map((x) => {
+          const l = label(x);
+          return h('div', { class: 'live' }, h('span', { class: 'live-dot' }), avatar(prof[x.user_id]),
+            h('div', { class: 'grow' }, h('b', {}, prof[x.user_id]?.display_name || '—'), h('div', { class: 'small', style: { color: '#ccc' } }, `regarde ${l.text}`)),
+            h('span', { class: 'small muted' }, dur(x.seconds)));
+        }) : h('p', { class: 'muted small', style: { padding: '0 16px 6px' } }, 'Personne ne regarde en ce moment.'),
+
+        h('div', { class: 'sec-h', style: { marginTop: '10px' } }, 'Par membre'),
+        h('div', { class: 'stat-grid' }, (profiles || []).map((p) => {
+          const o = per[p.id];
+          const top = o ? Object.entries(o.titles).sort((a, b) => b[1] - a[1])[0] : null;
+          return h('div', { class: 'stat' },
+            h('div', { class: 'who' }, avatar(p), p.display_name),
+            h('div', { class: 'big' }, o ? dur(o.secs) : '0 min'),
+            h('div', { class: 'small' }, o ? `vu ${ago(o.last)}` : 'aucun visionnage'),
+            top ? h('div', { class: 'small', style: { marginTop: '6px' } }, `Surtout : ${titleById(top[0])?.name || '—'}`) : null);
+        })),
+
+        Object.keys(perTitle).length ? [
+          h('div', { class: 'sec-h' }, 'Les plus regardés'),
+          Object.entries(perTitle).sort((a, b) => b[1].secs - a[1].secs).slice(0, 8).map(([tid, o]) => {
+            const t = titleById(tid);
+            return h('div', { class: 'hist' },
+              h('div', { class: 'th' }, t ? lazyImg(t.backdrop_key || t.poster_key) : null),
+              h('div', { class: 'meta' }, h('b', {}, t?.name || 'Titre supprimé'),
+                h('div', { class: 'sub' }, `${dur(o.secs)} · ${o.users.size} personne${o.users.size > 1 ? 's' : ''}`)));
+          })] : null,
+
+        h('div', { class: 'sec-h', style: { marginTop: '10px' } }, 'Historique'),
+        sessions.length ? sessions.slice(0, 150).map((x) => {
+          const l = label(x);
+          return h('div', { class: 'hist' },
+            h('div', { class: 'th' }, l.e?.thumb_key || l.t ? lazyImg(l.e?.thumb_key || l.t?.backdrop_key || l.t?.poster_key) : null),
+            h('div', { class: 'meta' },
+              h('div', {}, h('b', {}, prof[x.user_id]?.display_name || '—'), ` · ${l.text}`),
+              h('div', { class: 'sub' }, `${dur(x.seconds)} regardé · ${ago(x.last_seen)}`)));
+        }) : h('p', { class: 'muted small', style: { padding: '0 16px' } }, 'Aucun visionnage sur cette période.'),
+        h('div', { style: { height: '30px' } }));
+    } catch (e) { body.replaceChildren(h('p', { class: 'muted', style: { padding: '16px' } }, e.message)); }
+  }
+  load();
+  timer = setInterval(load, 30000);
+  root.cleanup = () => clearInterval(timer);
+  return root;
 }
