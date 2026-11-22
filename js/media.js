@@ -115,7 +115,12 @@ export function parseEpisode(filename, folder = '') {
 
 // Nom d'épisode « propre » à partir du fichier
 export function episodeName(filename, seriesName = '') {
-  let n = (filename || '').replace(/\.[^.]+$/, '')
+  let n = (filename || '').replace(/\.[^.]+$/, '');
+  // coupe tout ce qui suit les marqueurs de « release » (1080p, MULTi, BluRay, x265…)
+  const cut = /[ ._-](480p|576p|720p|1080p|2160p|4k|multi|vostfr|vff|vf2|truefrench|french|bluray|blu-ray|web(-?dl|rip)?|hdtv|x26[45]|h\.?26[45]|hevc|av1)\b/i.exec(n);
+  if (cut) n = n.slice(0, cut.index);
+  n = n
+    .replace(/\b(final|custom|proper|repack|integrale|intégrale|uncut|remastered)\b/ig, ' ')
     .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
     .replace(/s\d{1,2}\s*[._ -]?\s*e\d{1,4}/ig, ' ').replace(/\b\d{1,2}x\d{1,4}\b/ig, ' ')
     .replace(/\b(ep|episode|épisode)[ ._-]*\d{1,4}\b/ig, ' ')
