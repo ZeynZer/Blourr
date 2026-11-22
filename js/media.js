@@ -92,11 +92,36 @@ export async function toVtt(file) {
 export function guessName(filename) {
   return (filename || '').replace(/\.[^.]+$/, '').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
-// Essaie de lire "S01E03" dans un nom de fichier
-export function parseEpisode(filename) {
-  const m = /s(\d{1,2})\s*[ex](\d{1,3})/i.exec(filename) || /(\d{1,2})x(\d{1,3})/i.exec(filename);
-  if (m) return { season: +m[1], number: +m[2] };
-  const e = /(?:ep|episode|épisode|e)\s*(\d{1,3})/i.exec(filename);
-  if (e) return { season: null, number: +e[1] };
-  return null;
+// Devine saison / épisode à partir du nom de fichier (et du dossier)
+// Gère : S01E03, 1x03, E03, Ep 3, Épisode 3, "Naruto - 012", "[12]", "Titre 07 VOSTFR"…
+export function parseEpisode(filename, folder = '') {
+  const base = (filename || '').replace(/\.[^.]+$/, '');
+  let season = null; let number = null;
+  let m = /s(\d{1,2})\s*[._ -]?\s*e(\d{1,4})/i.exec(base) || /\b(\d{1,2})x(\d{1,4})\b/i.exec(base);
+  if (m) { season = +m[1]; number = +m[2]; }
+  if (number == null && /^\s*\d{1,4}\s*$/.test(base)) number = +base.trim();
+  if (number == null) {
+    m = /(?:^|[^a-z])(?:ep|episode|épisode|e)[ ._-]*(\d{1,4})(?!\d)/i.exec(base)
+      || /\[(\d{1,4})\]/.exec(base)
+      || /[ _-]+(\d{1,4})(?:v\d)?(?=[ _.\-\[(]|$)(?![ ._-]*(?:p|bit|fps)\b)/i.exec(base.replace(/\b(19|20)\d{2}\b/g, ' ').replace(/\b(480|576|720|1080|2160)p?\b/gi, ' ').replace(/\b[xh]\.?26[45]\b/gi, ' '));
+    if (m) number = +m[1];
+  }
+  if (season == null) {
+    const s2 = /(?:saison|season|s)[ ._-]*(\d{1,2})\b/i.exec(folder) || /(?:saison|season)[ ._-]*(\d{1,2})\b/i.exec(base);
+    if (s2) season = +s2[1];
+  }
+  return number == null && season == null ? null : { season, number };
+}
+
+// Nom d'épisode « propre » à partir du fichier
+export function episodeName(filename, seriesName = '') {
+  let n = (filename || '').replace(/\.[^.]+$/, '')
+    .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
+    .replace(/s\d{1,2}\s*[._ -]?\s*e\d{1,4}/ig, ' ').replace(/\b\d{1,2}x\d{1,4}\b/ig, ' ')
+    .replace(/\b(ep|episode|épisode)[ ._-]*\d{1,4}\b/ig, ' ')
+    .replace(/\b(vostfr|vf|vff|multi|french|truefrench|1080p|720p|480p|2160p|x26[45]|h\.?26[45]|hevc|web(-?dl|rip)?|bluray|aac|ac3)\b/ig, ' ')
+    .replace(/[._]+/g, ' ').replace(/\s+-\s+\d{1,4}\b/g, ' ').replace(/\s+/g, ' ').trim();
+  if (seriesName) n = n.replace(new RegExp('^' + seriesName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[-–:]?\\s*', 'i'), '');
+  n = n.replace(/^[-–:\s\d]+$/, '').replace(/^[-–:]\s*/, '').trim();
+  return n || null;
 }

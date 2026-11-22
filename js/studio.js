@@ -1,7 +1,7 @@
 import { h, icon, toast, errToast, sheet, confirmBox, bytes, runtime, clock, parseClock, uid, ext } from './ui.js';
 import { sb, state, lazyImg, bgInto, putUrls, putFile, removeKeys } from './api.js';
 import { cat, loadCatalog, titleById, episodesOf, sagaTitles } from './catalog.js';
-import { resizeImage, videoInfo, toVtt, guessName, parseEpisode } from './media.js';
+import { resizeImage, videoInfo, toVtt, guessName, parseEpisode, episodeName } from './media.js';
 import { go } from './router.js';
 
 const GENRES = ['Action', 'Aventure', 'Animation', 'Comédie', 'Drame', 'Famille', 'Fantastique', 'Science-fiction', 'Horreur', 'Thriller', 'Policier', 'Documentaire', 'Romance', 'Anime', 'Historique', 'Guerre', 'Western', 'Musique', 'Sport', 'Religieux'];
@@ -15,9 +15,12 @@ function progressModal(titleText) {
       h('h2', {}, titleText), label, h('div', { class: 'bar', style: { margin: '12px 0 8px', height: '8px' } }, bar),
       h('p', { class: 'small muted', style: { margin: '10px 0 0' } }, 'Garde l\'appli ouverte et l\'écran allumé jusqu\'à la fin.')));
   document.body.append(ov);
+  // garde l'écran allumé pendant l'envoi (si le navigateur le permet)
+  let lock = null;
+  navigator.wakeLock?.request('screen').then((l) => { lock = l; }).catch(() => {});
   return {
     set(p, txt) { bar.style.width = (p * 100).toFixed(1) + '%'; if (txt) label.textContent = txt; },
-    close() { ov.remove(); },
+    close() { ov.remove(); lock?.release().catch(() => {}); },
   };
 }
 async function uploadSet(files, modal, prefixText = '') {
@@ -247,9 +250,11 @@ function episodesEditor(t) {
     const seasons = [...new Set(eps.map((e) => e.season))].sort((a, b) => a - b);
     box.replaceChildren(
       h('div', { class: 'd-section-h' }, h('h4', {}, `Épisodes (${eps.length})`)),
-      h('div', { class: 'row', style: { marginBottom: '14px' } },
-        h('button', { class: 'btn primary grow', onclick: () => addEpisodes(t, draw) }, icon('upload'), 'Ajouter des épisodes')),
-      eps.length ? null : h('p', { class: 'muted small' }, 'Astuce : sélectionne plusieurs vidéos d\'un coup. Si les noms contiennent « S01E03 », la saison et le numéro sont détectés tout seuls.'),
+      h('div', { class: 'row', style: { marginBottom: '14px', flexWrap: 'wrap' } },
+        h('button', { class: 'btn primary grow', onclick: () => addEpisodes(t, draw) }, icon('upload'), 'Choisir des épisodes'),
+        'webkitdirectory' in document.createElement('input') && !/iP(hone|ad|od)/.test(navigator.userAgent)
+          ? h('button', { class: 'btn grow', onclick: () => addEpisodes(t, draw, true) }, icon('folder'), 'Tout un dossier') : null),
+      eps.length ? null : h('p', { class: 'muted small' }, 'Sélectionne tous les épisodes d\'un coup (et leurs .srt si tu en as). Sur ordinateur, « Tout un dossier » prend aussi les sous-dossiers « Saison 1 », « Saison 2 »…'),
       seasons.map((s) => [
         h('div', { style: { fontWeight: 700, margin: '14px 0 6px' } }, `Saison ${s}`),
         eps.filter((e) => e.season === s).map((e) => h('div', { class: 'studio-item', style: { margin: '0 0 8px' }, onclick: () => editEpisode(t, e, draw) },
@@ -263,51 +268,128 @@ function episodesEditor(t) {
   return box;
 }
 
-async function addEpisodes(t, after) {
-  const files = await pick('video/*,.mp4,.mov,.m4v,.webm,.mkv', true);
-  if (!files.length) return;
-  files.sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }));
-  const eps = episodesOf(t.id);
-  const lastSeason = eps.length ? Math.max(...eps.map((e) => e.season)) : 1;
+const VIDEO_RE = /\.(mp4|m4v|mov|webm|mkv|avi)$/i;
+const SUB_RE = /\.(srt|vtt)$/i;
+const baseOf = (n) => n.replace(/\.[^.]+$/, '').toLowerCase();
+
+function pickFolder() {
+  return new Promise((res) => {
+    const inp = h('input', { type: 'file', multiple: true, style: { display: 'none' } });
+    inp.setAttribute('webkitdirectory', '');
+    inp.addEventListener('change', () => { res([...inp.files]); inp.remove(); });
+    document.body.append(inp); inp.click();
+  });
+}
+
+async function addEpisodes(t, after, folder = false) {
+  const all = folder ? await pickFolder() : await pick('video/*,.mp4,.mov,.m4v,.webm,.mkv,.srt,.vtt', true);
+  const files = all.filter((f) => VIDEO_RE.test(f.name) || (f.type || '').startsWith('video/'));
+  const subs = all.filter((f) => SUB_RE.test(f.name));
+  if (!files.length) { if (all.length) errToast('Aucune vidéo trouvée.'); return; }
+  const dirOf = (f) => (f.webkitRelativePath || '').split('/').slice(0, -1).join('/');
+  files.sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, 'fr', { numeric: true }));
+
+  const existing = episodesOf(t.id);
+  const lastSeason = existing.length ? Math.max(...existing.map((e) => e.season)) : 1;
   const seasonIn = h('input', { class: 'input', value: lastSeason, inputmode: 'numeric' });
-  const startIn = h('input', { class: 'input', value: (eps.filter((e) => e.season === lastSeason).reduce((m, e) => Math.max(m, e.number), 0) + 1), inputmode: 'numeric' });
-  const detected = files.map((f) => parseEpisode(f.name));
-  const anyDetected = detected.some((d) => d && d.season);
+
+  // Lignes éditables
+  const rows = files.map((f) => {
+    const d = parseEpisode(f.name, dirOf(f)) || {};
+    const sub = subs.find((s) => baseOf(s.name) === baseOf(f.name))
+      || subs.find((s) => { const ds = parseEpisode(s.name, dirOf(s)); return ds && d.number != null && ds.number === d.number && (ds.season ?? d.season) === d.season; });
+    return { file: f, sub, dSeason: d.season ?? null, dNumber: d.number ?? null, name: episodeName(f.name, t.name), keep: true };
+  });
+  function assign() {
+    const def = parseInt(seasonIn.value, 10) || 1;
+    const next = {};
+    const maxOf = (s) => {
+      if (next[s] == null) next[s] = existing.filter((e) => e.season === s).reduce((m, e) => Math.max(m, e.number), 0);
+      return next[s];
+    };
+    // les numéros détectés d'abord, puis on complète les trous dans l'ordre
+    for (const r of rows) { r.season = r.manualS ?? r.dSeason ?? def; r.number = r.manualN ?? r.dNumber; }
+    for (const r of rows) if (r.number != null) next[r.season] = Math.max(maxOf(r.season), r.number);
+    for (const r of rows) if (r.number == null) { next[r.season] = maxOf(r.season) + 1; r.number = next[r.season]; }
+  }
+
+  const listEl = h('div', { style: { maxHeight: '46vh', overflow: 'auto', margin: '4px 0 14px' } });
+  const summary = h('div', { class: 'small muted' });
+  function draw() {
+    assign();
+    const kept = rows.filter((r) => r.keep);
+    summary.textContent = `${kept.length} épisode${kept.length > 1 ? 's' : ''} · ${bytes(kept.reduce((a, r) => a + r.file.size, 0))} · ${kept.filter((r) => r.sub).length} sous-titre(s) associé(s)`;
+    listEl.replaceChildren(...rows.slice().sort((a, b) => a.season - b.season || a.number - b.number).map((r) => {
+      if (!r.keep) return null;
+      const sIn = h('input', { class: 'input', value: r.season, inputmode: 'numeric', style: { width: '52px', height: '38px', padding: '0 8px', textAlign: 'center' } });
+      const nIn = h('input', { class: 'input', value: r.number, inputmode: 'numeric', style: { width: '62px', height: '38px', padding: '0 8px', textAlign: 'center' } });
+      const nameIn = h('input', { class: 'input', value: r.name || '', placeholder: 'Titre (facultatif)', style: { height: '38px', fontSize: '14px' } });
+      sIn.onchange = () => { r.manualS = parseInt(sIn.value, 10) || 1; draw(); };
+      nIn.onchange = () => { r.manualN = parseInt(nIn.value, 10) || null; draw(); };
+      nameIn.oninput = () => { r.name = nameIn.value.trim() || null; };
+      const clash = existing.find((e) => e.season === r.season && e.number === r.number);
+      const bad = /\.(mkv|avi)$/i.test(r.file.name);
+      return h('div', { style: { padding: '10px 0', borderBottom: '1px solid var(--line)' } },
+        h('div', { class: 'row' },
+          h('span', { class: 'small muted' }, 'S'), sIn, h('span', { class: 'small muted' }, 'É'), nIn,
+          h('div', { class: 'grow' }, nameIn),
+          h('button', { class: 'icon-btn', style: { width: '34px', height: '34px' }, onclick: () => { r.keep = false; draw(); } }, icon('x'))),
+        h('div', { class: 'small muted', style: { marginTop: '4px', wordBreak: 'break-all' } },
+          `${r.file.name} · ${bytes(r.file.size)}`,
+          r.sub ? h('span', { style: { color: 'var(--ok)' } }, ' · ST ✓') : null,
+          clash ? h('span', { style: { color: '#f59e0b' } }, ' · remplace l\'épisode existant') : null,
+          bad ? h('span', { style: { color: 'var(--danger)' } }, ' · .mkv/.avi illisible sur iPhone') : null));
+    }));
+  }
+  seasonIn.addEventListener('input', draw);
+  draw();
+
   sheet((close) => [
-    h('h2', {}, `${files.length} vidéo${files.length > 1 ? 's' : ''}`),
-    anyDetected ? h('p', { class: 'muted small' }, 'Saisons et numéros détectés dans les noms de fichiers quand c\'est possible.') : null,
-    h('div', { class: 'row' },
-      h('div', { class: 'field grow' }, h('label', {}, 'Saison'), seasonIn),
-      h('div', { class: 'field grow' }, h('label', {}, 'Premier n°'), startIn)),
-    h('div', { style: { maxHeight: '200px', overflow: 'auto', marginBottom: '14px' } }, files.map((f, i) => h('div', { class: 'small muted', style: { padding: '4px 0' } }, `${detected[i]?.season ? `S${detected[i].season}É${detected[i].number}` : '•'} ${f.name} · ${bytes(f.size)}`))),
-    h('button', { class: 'btn primary block', onclick: async () => {
-      close();
-      const season = parseInt(seasonIn.value, 10) || 1; let n = parseInt(startIn.value, 10) || 1;
-      const modal = progressModal('Envoi des épisodes');
-      try {
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i];
-          const d = detected[i];
-          const epId = uid();
-          const info = await videoInfo(f, { max: 640 });
-          const row = {
-            id: epId, title_id: t.id,
-            season: d?.season || season, number: d?.season ? d.number : (d?.number && !anyDetected ? n : n),
-            name: guessName(f.name).replace(/s\d{1,2}\s*[ex]\d{1,3}/i, '').trim() || null,
-            video_key: `c/${t.id}/e/${epId}.${ext(f.name)}`, video_size: f.size, duration: info.duration || null,
-          };
-          if (d?.season) row.number = d.number; else n++;
-          const up = [{ key: row.video_key, body: f, type: f.type || 'video/mp4', label: `Épisode ${i + 1}/${files.length}` }];
-          if (info.thumb) { row.thumb_key = `c/${t.id}/e/${epId}_t.jpg`; up.unshift({ key: row.thumb_key, body: info.thumb, type: 'image/jpeg', label: 'Miniature' }); }
-          await uploadSet(up, modal, `${f.name} · `);
-          const { error } = await sb.from('episodes').insert(row);
-          if (error) throw error;
-        }
-        await loadCatalog(true);
-        modal.close(); toast('Épisodes ajoutés'); after();
-      } catch (e) { modal.close(); errToast(e); await loadCatalog(true); after(); }
-    } }, icon('upload'), 'Envoyer'),
+    h('h2', {}, 'Ajouter des épisodes'),
+    h('p', { class: 'muted small', style: { marginTop: '-8px' } }, 'Saisons et numéros sont devinés depuis les noms (S01E03, « - 12 », Ep 5…) et les dossiers (« Saison 2 »). Vérifie et corrige si besoin.'),
+    h('div', { class: 'field', style: { marginBottom: '6px' } }, h('label', {}, 'Saison par défaut (si non détectée)'), seasonIn),
+    summary, listEl,
+    h('button', { class: 'btn primary block', onclick: () => { close(); sendEpisodes(t, rows.filter((r) => r.keep), existing, after); } }, icon('upload'), 'Tout envoyer'),
   ]);
+}
+
+async function sendEpisodes(t, rows, existing, after) {
+  if (!rows.length) return;
+  const modal = progressModal('Envoi des épisodes');
+  const failed = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]; const f = r.file;
+    const prefix = `${i + 1}/${rows.length} · S${r.season}É${r.number} · `;
+    try {
+      modal.set(i / rows.length, prefix + 'analyse…');
+      const clash = existing.find((e) => e.season === r.season && e.number === r.number);
+      const epId = clash ? clash.id : uid();
+      const v = Date.now().toString(36);
+      const info = await videoInfo(f, { max: 640 });
+      const row = {
+        id: epId, title_id: t.id, season: r.season, number: r.number,
+        name: r.name || clash?.name || null,
+        video_key: `c/${t.id}/e/${epId}_${v}.${ext(f.name)}`, video_size: f.size, duration: info.duration || null,
+      };
+      const up = [];
+      if (info.thumb) { row.thumb_key = `c/${t.id}/e/${epId}_t_${v}.jpg`; up.push({ key: row.thumb_key, body: info.thumb, type: 'image/jpeg', label: 'Miniature' }); }
+      if (r.sub) { row.subtitle_key = `c/${t.id}/e/${epId}_${v}.vtt`; up.push({ key: row.subtitle_key, body: await toVtt(r.sub), type: 'text/vtt', label: 'Sous-titres' }); }
+      up.push({ key: row.video_key, body: f, type: f.type || 'video/mp4', label: f.name });
+      await uploadSet(up, { set: (p, txt) => modal.set((i + p) / rows.length, prefix + (txt || '')) });
+      const { error } = clash
+        ? await sb.from('episodes').update(row).eq('id', epId)
+        : await sb.from('episodes').insert(row);
+      if (error) throw error;
+      if (clash) removeKeys([clash.video_key, row.thumb_key ? clash.thumb_key : null, row.subtitle_key ? clash.subtitle_key : null].filter(Boolean)).catch(() => {});
+    } catch (e) {
+      failed.push(`${f.name} (${e.message})`);
+    }
+  }
+  await loadCatalog(true);
+  modal.close();
+  if (failed.length) errToast(`${rows.length - failed.length}/${rows.length} envoyés. Échecs : ${failed.join(', ')}`);
+  else toast(`${rows.length} épisode${rows.length > 1 ? 's' : ''} ajouté${rows.length > 1 ? 's' : ''}`);
+  after();
 }
 
 function editEpisode(t, e, after) {
