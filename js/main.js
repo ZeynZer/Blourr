@@ -6,6 +6,7 @@ import { galleryView } from './gallery.js';
 import { cineView } from './cine.js';
 import { studioView } from './studio.js';
 import { profileView } from './profile.js';
+import { playIntro, unlockAudio } from './intro.js';
 
 const app = document.getElementById('app');
 let current = null;
@@ -13,8 +14,8 @@ let nav = null;
 
 function buildNav() {
   nav = h('nav', { class: 'nav' },
-    h('a', { href: '#/galerie', 'data-sec': 'galerie' }, icon('images'), 'Galerie', h('i', { class: 'nav-dot' })),
     h('a', { href: '#/cine', 'data-sec': 'cine' }, icon('film'), 'Ciné', h('i', { class: 'nav-dot' })),
+    h('a', { href: '#/galerie', 'data-sec': 'galerie' }, icon('images'), 'Galerie', h('i', { class: 'nav-dot' })),
     h('a', { href: '#/profil', 'data-sec': 'profil' }, icon('user'), 'Profil', h('i', { class: 'nav-dot' })));
   document.body.append(nav);
 }
@@ -30,14 +31,14 @@ function mount(view) {
 function route() {
   if (!state.profile) return;
   const p = parts();
-  const sec = p[0] || 'galerie';
+  const sec = p[0] || 'cine';
   let view;
   if (sec === 'galerie') view = galleryView({ tab: p[1] || 'all' });
   else if (sec === 'album') view = galleryView({ albumId: p[1] });
   else if (sec === 'cine') view = cineView(p.slice(1));
   else if (sec === 'studio') view = studioView(p.slice(1));
   else if (sec === 'profil') view = profileView();
-  else { go('#/galerie', true); return; }
+  else { go('#/cine', true); return; }
   const navSec = sec === 'album' ? 'galerie' : sec === 'studio' ? 'cine' : sec;
   nav?.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.dataset.sec === navSec));
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', navSec === 'cine' ? '#0c0c0e' : '#07070b');
@@ -57,10 +58,19 @@ async function enter(session) {
   state.isAdmin = profile.role === 'admin';
   try { const s = await r2('status'); state.configured = s.configured; } catch { state.configured = null; }
   if (!nav) buildNav();
+  // À l'ouverture de l'appli : direction le Ciné, avec le générique
+  if (!sessionStorage.getItem('blourr-intro')) {
+    sessionStorage.setItem('blourr-intro', '1');
+    if (!location.hash || location.hash === '#/' || location.hash === '#/galerie') history.replaceState(null, '', '#/cine');
+    route();
+    await playIntro();
+    return;
+  }
   route();
 }
 
 function leave() {
+  sessionStorage.removeItem('blourr-intro');
   state.session = null; state.profile = null; state.isAdmin = false;
   nav?.remove(); nav = null;
   mount(authView());
@@ -84,3 +94,6 @@ onRoute(route);
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
 }
+
+// le premier toucher débloque le son (exigence de l'iPhone)
+document.addEventListener('pointerdown', unlockAudio, { once: true, capture: true });

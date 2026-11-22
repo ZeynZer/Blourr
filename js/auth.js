@@ -1,5 +1,6 @@
 import { h } from './ui.js';
 import { sb, signup } from './api.js';
+import { unlockAudio } from './intro.js';
 
 export function authView() {
   let mode = 'login';
@@ -31,6 +32,7 @@ export function authView() {
   const form = h('form', {
     onsubmit: async (e) => {
       e.preventDefault();
+      unlockAudio();
       err.textContent = '';
       btn.disabled = true;
       const old = btn.textContent;
