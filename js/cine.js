@@ -136,18 +136,31 @@ export function cineView(sub = []) {
     rows.push(row(`Reprendre avec ${state.profile.display_name}`, cw.map((x) => card(x.title, { cw: x }))));
     const myl = cat.listOrder.map(titleById).filter((t) => t && pool.includes(t));
     rows.push(row('Ma liste', myl.map((t) => card(t))));
-    rows.push(row('Nouveautés', pool.slice(0, 15).map((t) => card(t))));
+    // Chaque titre n'apparaît qu'une fois dans les rangées du catalogue
+    // (« Reprendre » et « Ma liste » sont personnelles et restent à part).
+    const big = pool.length >= 12;
+    if (big) rows.push(row('Nouveautés', pool.slice(0, 10).map((t) => card(t))));
     if (mode === 'home') {
       const sagas = cat.sagas.filter((s) => sagaTitles(s.id).some((t) => pool.includes(t)));
       rows.push(row('Sagas', sagas.map(sagaCard)));
-      rows.push(row('Séries', pool.filter((t) => t.kind === 'series').map((t) => card(t, { poster: true }))));
-      rows.push(row('Films', pool.filter((t) => t.kind === 'movie').map((t) => card(t, { poster: true }))));
     }
-    const genres = {};
-    for (const t of pool) for (const g of t.genres || []) (genres[g] = genres[g] || []).push(t);
-    Object.entries(genres).sort((a, b) => b[1].length - a[1].length).forEach(([g, l]) => {
-      if (l.length >= 2) rows.push(row(g, l.map((t) => card(t))));
-    });
+    const used = new Set(big ? pool.slice(0, 10).map((t) => t.id) : []);
+    let genreRows = 0;
+    if (pool.length >= 8) {
+      const count = {};
+      for (const t of pool) for (const g of t.genres || []) count[g] = (count[g] || 0) + 1;
+      for (const g of Object.keys(count).sort((a, b) => count[b] - count[a])) {
+        const list = pool.filter((t) => !used.has(t.id) && (t.genres || []).includes(g));
+        if (list.length < 3) continue;
+        list.forEach((t) => used.add(t.id));
+        rows.push(row(g, list.map((t) => card(t))));
+        genreRows++;
+      }
+    }
+    const rest = pool.filter((t) => !used.has(t.id));
+    const more = genreRows ? 'Encore plus de ' : '';
+    if (mode !== 'films') rows.push(row(more ? more + 'séries' : 'Séries', rest.filter((t) => t.kind === 'series').map((t) => card(t, { poster: true }))));
+    if (mode !== 'series') rows.push(row(more ? more + 'films' : 'Films', rest.filter((t) => t.kind === 'movie').map((t) => card(t, { poster: true }))));
     body.append(h('div', { style: { marginTop: '-30px', position: 'relative', zIndex: 2 } }, rows));
   }
   refreshCurrent = () => render(false);
