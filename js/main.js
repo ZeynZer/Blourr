@@ -73,6 +73,8 @@ function leave() {
   sessionStorage.removeItem('blourr-intro');
   state.session = null; state.profile = null; state.isAdmin = false;
   nav?.remove(); nav = null;
+  // ne pas reconstruire l'écran de connexion s'il est déjà affiché (sinon le clavier se referme)
+  if (current?.isAuth) return;
   mount(authView());
 }
 
