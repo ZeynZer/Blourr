@@ -1,4 +1,5 @@
 import { createClient } from './vendor/supabase.js';
+import { setAvatarLoader } from './ui.js';
 
 export const SUPABASE_URL = 'https://umqztmjhvkelviddnjcm.supabase.co';
 export const SUPABASE_KEY = 'sb_publishable_g2Lz5vdW6iZxvk4ecnpp_g_Jh7y-AoV';
@@ -153,3 +154,5 @@ export async function bgInto(el, key) {
   if (!key) return;
   try { const u = await signedUrl(key); el.style.backgroundImage = `url("${u}")`; } catch { /* rien */ }
 }
+
+setAvatarLoader(lazyImg);

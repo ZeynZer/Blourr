@@ -1,6 +1,6 @@
 import { h, icon, errToast, toast, runtime, avatar, confirmBox, dateFr } from './ui.js';
 import { sb, state, lazyImg, bgInto } from './api.js';
-import { cat, loadCatalog, titleById, sagaById, episodesOf, sagaTitles, progressOf, ratio, resumeTarget, continueWatching, toggleList, isPlayable } from './catalog.js';
+import { cat, loadCatalog, titleById, sagaById, episodesOf, sagaTitles, progressOf, ratio, resumeTarget, continueWatching, toggleList, toggleFav, isPlayable } from './catalog.js';
 import { openPlayer } from './player.js';
 import { go } from './router.js';
 
@@ -284,6 +284,8 @@ export async function openDetail(id) {
           saga ? h('div', {}, h('b', {}, 'Saga : '), h('a', { href: '#/cine/saga/' + saga.id, onclick: close, style: { textDecoration: 'underline' } }, saga.name)) : null),
         h('div', { class: 'd-actions' },
           h('button', { onclick: async () => { try { await toggleList(t.id); render(); } catch (e) { errToast(e); } } }, icon(inList ? 'check' : 'plus'), 'Ma liste'),
+          h('button', { onclick: async () => { try { const on = await toggleFav(t.id); render(); if (on) toast('Ajouté à tes préférés ❤️'); } catch (e) { errToast(e); } } },
+            (() => { const i = icon(cat.favs.has(t.id) ? 'heartf' : 'heart'); if (cat.favs.has(t.id)) i.style.color = 'var(--cine-red)'; return i; })(), 'J\'adore'),
           navigator.share ? h('button', { onclick: () => navigator.share({ title: t.name, text: `Regarde « ${t.name} » sur Blourr`, url: location.origin + location.pathname }).catch(() => {}) }, icon('share'), 'Partager') : null,
           state.isAdmin ? h('button', { onclick: () => { close(); go('#/studio/t/' + t.id); } }, icon('edit'), 'Modifier') : null),
         t.kind === 'series' ? episodesBlock(t, close) : null,
@@ -386,7 +388,7 @@ function requestsView() {
 
   async function load() {
     const { data, error } = await sb.from('requests')
-      .select('*, author:profiles(id, display_name, color), votes:request_votes(user_id)')
+      .select('*, author:profiles(id, display_name, color, avatar_key), votes:request_votes(user_id)')
       .order('created_at', { ascending: false });
     if (error) { list.replaceChildren(h('p', { class: 'muted', style: { padding: '0 16px' } }, error.message)); return; }
     const counts = { pending: 0, added: 0, refused: 0 };

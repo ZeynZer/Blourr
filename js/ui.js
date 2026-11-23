@@ -178,8 +178,16 @@ const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet'
 export const monthLabel = (d) => { d = new Date(d); return MONTHS[d.getMonth()].replace(/^./, c => c.toUpperCase()) + ' ' + d.getFullYear(); };
 export function dateFr(d) { d = new Date(d); return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear(); }
 export function initials(n) { return (n || '?').trim().charAt(0).toUpperCase(); }
+let lazyImgRef = null;
+export function setAvatarLoader(fn) { lazyImgRef = fn; }
 export function avatar(p, cls = '') {
-  return h('div', { class: 'avatar ' + cls, style: { background: p?.color || '#7c5cff' } }, initials(p?.display_name));
+  const el = h('div', { class: 'avatar ' + cls, style: { background: p?.color || '#7c5cff' } }, initials(p?.display_name));
+  if (p?.avatar_key && lazyImgRef) {
+    const img = lazyImgRef(p.avatar_key, { eager: true, alt: p.display_name || '' });
+    img.addEventListener('load', () => el.classList.add('has-photo'));
+    el.append(img);
+  }
+  return el;
 }
 export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 export const ext = (name) => { const m = /\.([a-z0-9]{1,8})$/i.exec(name || ''); return m ? m[1].toLowerCase() : 'bin'; };

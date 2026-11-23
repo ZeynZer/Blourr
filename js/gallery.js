@@ -60,7 +60,7 @@ export function galleryView({ albumId = null, tab = 'all' } = {}) {
     if (filter === 'albums') return renderAlbums();
     if (!more) { items = []; reachedEnd = false; content.replaceChildren(h('div', { class: 'center-load' }, h('div', { class: 'spinner' }))); }
     loadingMore = true;
-    let q = sb.from('media').select('*, owner:profiles(id, display_name, color)').order('created_at', { ascending: false }).range(items.length, items.length + PAGE - 1);
+    let q = sb.from('media').select('*, owner:profiles(id, display_name, color, avatar_key)').order('created_at', { ascending: false }).range(items.length, items.length + PAGE - 1);
     if (albumId) q = q.eq('album_id', albumId);
     if (filter === 'photo' || filter === 'video' || filter === 'file') q = q.eq('kind', filter);
     const { data, error } = await q;

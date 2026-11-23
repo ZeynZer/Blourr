@@ -1,5 +1,8 @@
-import { h, icon, toast, errToast, confirmBox, promptBox, bytes, avatar } from './ui.js';
-import { sb, state, r2, STORAGE_LIMIT } from './api.js';
+import { h, icon, toast, errToast, confirmBox, promptBox, bytes, avatar, sheet } from './ui.js';
+import { sb, state, r2, STORAGE_LIMIT, putUrls, putFile, removeKeys, lazyImg } from './api.js';
+import { resizeImage } from './media.js';
+import { cat, loadCatalog, titleById } from './catalog.js';
+import { openDetail } from './cine.js';
 
 const CORS = `[
   {
@@ -15,10 +18,51 @@ export function profileView() {
   const p = state.profile;
   const root = h('div', { class: 'view' });
   const nameEl = h('div', { class: 'nm' }, p.display_name);
-  const av = avatar(p, 'lg');
+  const bioEl = h('div', { class: 'bio' }, p.bio || '');
+  const avBox = h('div', { class: 'avatar-edit', title: 'Changer la photo', onclick: () => changePhoto() });
+  const drawAv = () => avBox.replaceChildren(avatar(p, 'xl'), h('div', { class: 'cam' }, icon('images')));
+  drawAv();
+  async function changePhoto() {
+    const choose = (accept) => new Promise((res) => {
+      const inp = h('input', { type: 'file', accept, style: { display: 'none' } });
+      inp.addEventListener('change', () => { res(inp.files[0]); inp.remove(); });
+      document.body.append(inp); inp.click();
+    });
+    const actions = [];
+    sheet((close) => [
+      h('h2', {}, 'Photo de profil'),
+      h('button', { class: 'list-btn', onclick: async () => { close(); upload(await choose('image/*')); } }, icon('images'), 'Choisir une photo'),
+      p.avatar_key ? h('button', { class: 'list-btn danger', onclick: async () => {
+        close();
+        const old = p.avatar_key;
+        const { error } = await sb.from('profiles').update({ avatar_key: null }).eq('id', p.id);
+        if (error) return errToast(error);
+        p.avatar_key = null; drawAv(); removeKeys([old]).catch(() => {});
+      } }, icon('trash'), 'Retirer la photo') : null,
+      actions,
+    ]);
+    async function upload(file) {
+      if (!file) return;
+      if (state.configured === false) return errToast('Le stockage n\'est pas encore configuré.');
+      try {
+        toast('Envoi de la photo…');
+        const { blob } = await resizeImage(file, { mode: 'cover', w: 480, h: 480, q: 0.86 });
+        const key = `g/${p.id}/avatar_${Date.now().toString(36)}.jpg`;
+        const urls = await putUrls([key]);
+        await putFile(urls[key], blob, 'image/jpeg');
+        const old = p.avatar_key;
+        const { error } = await sb.from('profiles').update({ avatar_key: key }).eq('id', p.id);
+        if (error) throw error;
+        p.avatar_key = key; drawAv();
+        if (old) removeKeys([old]).catch(() => {});
+        toast('Photo mise à jour');
+      } catch (e) { errToast(e); }
+    }
+  }
+  const av = { set textContent(v) { drawAv(); } };
   root.append(
     h('div', { class: 'topbar' }, h('h1', {}, 'Profil')),
-    h('div', { class: 'me' }, av, nameEl,
+    h('div', { class: 'me' }, avBox, nameEl, bioEl,
       h('div', { class: 'muted small', style: { margin: '4px 0 8px' } }, state.session?.user?.email || ''),
       state.isAdmin ? h('span', { class: 'role-pill' }, 'Administrateur') : h('span', { class: 'role-pill', style: { background: 'var(--surface3)', color: 'var(--muted)' } }, 'Membre'),
       h('div', { class: 'row', style: { marginTop: '16px' } },
@@ -28,7 +72,14 @@ export function profileView() {
           const { error } = await sb.from('profiles').update({ display_name: n }).eq('id', p.id);
           if (error) return errToast(error);
           p.display_name = n; nameEl.textContent = n; av.textContent = n.charAt(0).toUpperCase();
-        } }, icon('edit'), 'Modifier'),
+        } }, icon('edit'), 'Prénom'),
+        h('button', { class: 'btn sm', onclick: async () => {
+          const b = await promptBox('Ta petite phrase (150 caractères max)', { value: p.bio || '', placeholder: 'Ex : fan de Marvel et de mangas', ok: 'Enregistrer' });
+          if (b === null) return;
+          const { error } = await sb.from('profiles').update({ bio: b.slice(0, 150) || null }).eq('id', p.id);
+          if (error) return errToast(error);
+          p.bio = b.slice(0, 150); bioEl.textContent = p.bio;
+        } }, icon('sparkle'), 'Bio'),
         h('button', { class: 'btn sm', onclick: async () => {
           const pw = await promptBox('Nouveau mot de passe', { placeholder: '6 caractères minimum', ok: 'Changer' });
           if (!pw) return;
@@ -36,6 +87,7 @@ export function profileView() {
           if (error) return errToast(error.message);
           toast('Mot de passe changé');
         } }, icon('lock'), 'Mot de passe'))),
+    favsCard(),
     usageCard(),
     state.isAdmin ? storageCard() : null,
     state.isAdmin ? familyCard() : null,
@@ -174,4 +226,19 @@ function installCard() {
   return h('div', { class: 'card' },
     h('h3', {}, icon('sparkle'), 'Installer l\'appli'),
     h('p', { class: 'small muted', style: { margin: 0 } }, 'Sur iPhone : ouvre Blourr dans Safari, touche ', h('b', {}, 'Partager'), ' puis ', h('b', {}, 'Sur l\'écran d\'accueil'), '. Sur Android : menu ⋮ → ', h('b', {}, 'Installer l\'application'), '.'));
+}
+
+function favsCard() {
+  const grid = h('div', { class: 'fav-grid' }, h('div', { class: 'spinner', style: { margin: '10px auto', gridColumn: '1/-1' } }));
+  loadCatalog().then(() => {
+    const favs = [...cat.favs].map(titleById).filter(Boolean);
+    if (!favs.length) { grid.replaceChildren(h('p', { class: 'muted small', style: { gridColumn: '1/-1', margin: 0 } }, 'Touche « J\'adore » sur la fiche d\'un film ou d\'une série : ils s\'afficheront ici et sur ta carte dans l\'onglet Famille.')); return; }
+    grid.replaceChildren(...favs.map((t) => {
+      const c = h('div', { class: 'c-card poster', onclick: () => { location.hash = '#/cine'; setTimeout(() => openDetail(t.id), 300); } });
+      if (t.poster_key || t.backdrop_key) c.append(lazyImg(t.poster_key || t.backdrop_key));
+      else c.append(h('div', { class: 'fallback' }, t.name));
+      return c;
+    }));
+  }).catch(() => {});
+  return h('div', { class: 'card' }, h('h3', {}, icon('heart'), 'Mes préférés'), grid);
 }

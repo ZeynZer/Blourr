@@ -6,6 +6,7 @@ import { galleryView } from './gallery.js';
 import { cineView } from './cine.js';
 import { studioView } from './studio.js';
 import { profileView } from './profile.js';
+import { familyView } from './family.js';
 import { playIntro, unlockAudio } from './intro.js';
 
 const app = document.getElementById('app');
@@ -16,6 +17,7 @@ function buildNav() {
   nav = h('nav', { class: 'nav' },
     h('a', { href: '#/cine', 'data-sec': 'cine' }, icon('film'), 'Ciné', h('i', { class: 'nav-dot' })),
     h('a', { href: '#/galerie', 'data-sec': 'galerie' }, icon('images'), 'Galerie', h('i', { class: 'nav-dot' })),
+    h('a', { href: '#/famille', 'data-sec': 'famille' }, icon('users'), 'Famille', h('i', { class: 'nav-dot' })),
     h('a', { href: '#/profil', 'data-sec': 'profil' }, icon('user'), 'Profil', h('i', { class: 'nav-dot' })));
   document.body.append(nav);
 }
@@ -38,6 +40,7 @@ function route() {
   else if (sec === 'cine') view = cineView(p.slice(1));
   else if (sec === 'studio') view = studioView(p.slice(1));
   else if (sec === 'profil') view = profileView();
+  else if (sec === 'famille') view = familyView();
   else { go('#/cine', true); return; }
   const navSec = sec === 'album' ? 'galerie' : sec === 'studio' ? 'cine' : sec;
   nav?.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.dataset.sec === navSec));

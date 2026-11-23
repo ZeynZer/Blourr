@@ -1,21 +1,24 @@
-import { sb } from './api.js';
+import { sb, state } from './api.js';
 
-export const cat = { titles: [], sagas: [], episodes: [], progress: [], myList: new Set(), loaded: false };
+export const cat = { titles: [], sagas: [], episodes: [], progress: [], myList: new Set(), favs: new Set(), favAll: [], loaded: false };
 
 export async function loadCatalog(force = false) {
   if (cat.loaded && !force) return cat;
-  const [t, s, e, p, l] = await Promise.all([
+  const [t, s, e, p, l, fv] = await Promise.all([
     sb.from('titles').select('*').order('created_at', { ascending: false }),
     sb.from('sagas').select('*').order('name'),
     sb.from('episodes').select('*').order('season').order('number'),
     sb.from('watch_progress').select('*').order('updated_at', { ascending: false }),
     sb.from('my_list').select('title_id, created_at').order('created_at', { ascending: false }),
+    sb.from('favorites').select('user_id, title_id, created_at').order('created_at', { ascending: false }),
   ]);
-  const err = t.error || s.error || e.error || p.error || l.error;
+  const err = t.error || s.error || e.error || p.error || l.error || fv.error;
   if (err) throw err;
   cat.titles = t.data; cat.sagas = s.data; cat.episodes = e.data; cat.progress = p.data;
   cat.myList = new Set(l.data.map((x) => x.title_id));
   cat.listOrder = l.data.map((x) => x.title_id);
+  cat.favAll = fv.data;
+  cat.favs = new Set(fv.data.filter((x) => x.user_id === state.profile?.id).map((x) => x.title_id));
   cat.loaded = true;
   return cat;
 }
@@ -91,5 +94,19 @@ export async function toggleList(tid) {
   cat.myList.add(tid);
   cat.listOrder.unshift(tid);
   await sb.from('my_list').insert({ title_id: tid });
+  return true;
+}
+
+export async function toggleFav(tid) {
+  const me = state.profile.id;
+  if (cat.favs.has(tid)) {
+    cat.favs.delete(tid);
+    cat.favAll = cat.favAll.filter((x) => !(x.user_id === me && x.title_id === tid));
+    await sb.from('favorites').delete().eq('title_id', tid).eq('user_id', me);
+    return false;
+  }
+  cat.favs.add(tid);
+  cat.favAll.unshift({ user_id: me, title_id: tid, created_at: new Date().toISOString() });
+  await sb.from('favorites').insert({ title_id: tid });
   return true;
 }
