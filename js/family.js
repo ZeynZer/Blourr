@@ -3,6 +3,7 @@ import { sb, state, lazyImg } from './api.js';
 import { cat, loadCatalog, titleById } from './catalog.js';
 import { openDetail } from './cine.js';
 import { openViewer } from './gallery.js';
+import { donateCard } from './donate.js';
 
 // ======================================================================
 // La famille : tous les inscrits, leur photo et leurs films préférés
@@ -10,7 +11,7 @@ import { openViewer } from './gallery.js';
 export function familyView() {
   const root = h('div', { class: 'view' });
   const grid = h('div', { class: 'fam-grid' }, h('div', { class: 'center-load', style: { gridColumn: '1/-1' } }, h('div', { class: 'spinner' })));
-  root.append(h('div', { class: 'topbar' }, h('h1', {}, 'Famille')), grid);
+  root.append(h('div', { class: 'topbar' }, h('h1', {}, 'Famille')), donateCard(), grid);
 
   (async () => {
     try {

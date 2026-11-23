@@ -3,6 +3,7 @@ import { sb, state, r2, STORAGE_LIMIT, putUrls, putFile, removeKeys, lazyImg } f
 import { resizeImage } from './media.js';
 import { cat, loadCatalog, titleById } from './catalog.js';
 import { openDetail } from './cine.js';
+import { donateSettingsCard } from './donate.js';
 
 const CORS = `[
   {
@@ -91,6 +92,7 @@ export function profileView() {
     usageCard(),
     state.isAdmin ? storageCard() : null,
     state.isAdmin ? familyCard() : null,
+    state.isAdmin ? donateSettingsCard() : null,
     state.isAdmin ? membersCard() : null,
     installCard(),
     h('div', { style: { padding: '0 18px 30px' } },
