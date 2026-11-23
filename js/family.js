@@ -96,7 +96,7 @@ async function memberSheet(p, sharedCount) {
     h('h3', { class: 'sh' }, `Ses derniers partages (${sharedCount})`),
     photos,
   ]);
-  const { data } = await sb.from('media').select('*, owner:profiles(id, display_name, color, avatar_key)').eq('owner_id', p.id).neq('kind', 'file').order('created_at', { ascending: false }).limit(12);
+  const { data } = await sb.from('media').select('*, owner:profiles(id, display_name, color, avatar_key)').eq('owner_id', p.id).eq('is_private', false).neq('kind', 'file').order('created_at', { ascending: false }).limit(12);
   if (!data?.length) { photos.replaceChildren(h('p', { class: 'muted small' }, 'Rien de partagé pour l\'instant.')); return; }
   photos.replaceChildren(h('div', { class: 'mini-grid' }, data.map((m, i) => h('div', { class: 't', onclick: () => openViewer(data, i) }, lazyImg(m.thumb_key, { eager: true })))));
   return close;

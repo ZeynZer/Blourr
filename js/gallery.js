@@ -63,7 +63,7 @@ export function galleryView({ albumId = null, tab = 'all' } = {}) {
     if (!more) { items = []; reachedEnd = false; content.replaceChildren(h('div', { class: 'center-load' }, h('div', { class: 'spinner' }))); }
     loadingMore = true;
     let q = sb.from('media').select('*, owner:profiles(id, display_name, color, avatar_key)').order('created_at', { ascending: false }).range(items.length, items.length + PAGE - 1);
-    if (albumId) q = q.eq('album_id', albumId);
+    if (albumId) q = q.eq('album_id', albumId); else q = q.eq('is_private', false);
     if (filter === 'photo' || filter === 'video' || filter === 'file') q = q.eq('kind', filter);
     const { data, error } = await q;
     loadingMore = false;
@@ -79,7 +79,7 @@ export function galleryView({ albumId = null, tab = 'all' } = {}) {
       content.replaceChildren(h('div', { class: 'empty' },
         h('div', { class: 'em-ic' }, icon(filter === 'file' ? 'file' : filter === 'video' ? 'video' : 'images')),
         h('h3', {}, albumId ? 'Album vide' : what ? `Aucun ${what} pour l'instant` : 'Rien ici pour l\'instant'),
-        h('p', {}, 'Ajoute les premiers souvenirs de la famille.'),
+        h('p', {}, album?.private ? 'Ajoute ici tes fichiers privés : personne d\'autre ne les verra.' : 'Ajoute les premiers souvenirs de la famille.'),
         h('button', { class: 'btn primary', onclick: () => pickFiles() }, icon('upload'), 'Ajouter')));
       return;
     }
@@ -181,23 +181,49 @@ export function galleryView({ albumId = null, tab = 'all' } = {}) {
     const counts = {}; const covers = {};
     for (const m of med || []) { counts[m.album_id] = (counts[m.album_id] || 0) + 1; if (!covers[m.album_id] && m.thumb_key) covers[m.album_id] = m.thumb_key; }
     const grid = h('div', { class: 'albums' },
-      h('div', { class: 'album-card new', onclick: async () => {
-        const name = await promptBox('Nouvel album', { placeholder: 'Ex : Vacances 2026', ok: 'Créer' });
-        if (!name) return;
-        const { data, error } = await sb.from('albums').insert({ name, created_by: state.profile.id }).select().single();
-        if (error) return errToast(error);
-        go('#/album/' + data.id);
-      } }, h('div', { class: 'cover' }, icon('plus')), h('div', { class: 't' }, 'Nouvel album'), h('div', { class: 'c' }, ' ')),
-      (albums || []).map((a) => h('div', { class: 'album-card', onclick: () => go('#/album/' + a.id) },
-        h('div', { class: 'cover' }, covers[a.id] ? lazyImg(covers[a.id]) : icon('album')),
+      h('div', { class: 'album-card new', onclick: () => newAlbum() }, h('div', { class: 'cover' }, icon('plus')), h('div', { class: 't' }, 'Nouvel album'), h('div', { class: 'c' }, ' ')),
+      (albums || []).sort((a, b) => (b.private ? 1 : 0) - (a.private ? 1 : 0)).map((a) => h('div', { class: 'album-card' + (a.private ? ' private' : ''), onclick: () => go('#/album/' + a.id) },
+        h('div', { class: 'cover' }, covers[a.id] ? lazyImg(covers[a.id]) : icon(a.private ? 'lock' : 'album'), a.private ? h('span', { class: 'lock-badge' }, icon('lock'), 'Privé') : null),
         h('div', { class: 't' }, a.name),
         h('div', { class: 'c' }, `${counts[a.id] || 0} élément${(counts[a.id] || 0) > 1 ? 's' : ''}`))));
     content.replaceChildren(grid);
   }
 
+  function newAlbum() {
+    const nameIn = h('input', { class: 'input', placeholder: 'Ex : Vacances 2026' });
+    const priv = h('input', { type: 'checkbox' });
+    sheet((close) => [
+      h('h2', {}, 'Nouvel album'),
+      nameIn,
+      state.isAdmin ? h('div', { class: 'row', style: { justifyContent: 'space-between', margin: '16px 0 4px' } },
+        h('div', { class: 'grow' }, h('div', { style: { fontWeight: 600 } }, '🔒 Album privé'), h('div', { class: 'small muted' }, 'Visible uniquement par toi. Son contenu n\'apparaît nulle part ailleurs.')),
+        h('label', { class: 'switch' }, priv, h('span'))) : null,
+      h('button', { class: 'btn primary block', style: { marginTop: '16px' }, onclick: async () => {
+        const name = nameIn.value.trim();
+        if (!name) return errToast('Donne un nom à l\'album.');
+        const { data, error } = await sb.from('albums').insert({ name, created_by: state.profile.id, private: priv.checked }).select().single();
+        if (error) return errToast(error);
+        close(); go('#/album/' + data.id);
+      } }, 'Créer'),
+    ]);
+    setTimeout(() => nameIn.focus(), 250);
+  }
+
+  function drawTitle() {
+    title.replaceChildren(album?.private ? icon('lock') : null, album?.name || 'Album introuvable');
+  }
+
   async function albumActions() {
     sheet((close) => [
       h('h2', {}, album?.name || 'Album'),
+      state.isAdmin && album?.created_by === state.profile.id ? h('button', { class: 'list-btn', onclick: async () => {
+        close();
+        const to = !album.private;
+        if (!(await confirmBox(to ? 'Rendre l\'album privé ?' : 'Rendre l\'album public ?', to ? 'Son contenu ne sera plus visible que par toi.' : 'Toute la famille pourra voir son contenu.', to ? 'Rendre privé' : 'Rendre public', false))) return;
+        const { error } = await sb.from('albums').update({ private: to }).eq('id', albumId);
+        if (error) return errToast(error);
+        album.private = to; drawTitle(); toast(to ? 'Album privé' : 'Album visible par la famille');
+      } }, icon('lock'), album?.private ? 'Rendre public' : 'Rendre privé') : null,
       h('button', { class: 'list-btn', onclick: async () => {
         close();
         const name = await promptBox('Renommer l\'album', { value: album.name, ok: 'Renommer' });
@@ -208,7 +234,11 @@ export function galleryView({ albumId = null, tab = 'all' } = {}) {
       } }, icon('edit'), 'Renommer'),
       h('button', { class: 'list-btn danger', onclick: async () => {
         close();
-        if (!(await confirmBox('Supprimer l\'album ?', 'Les photos et vidéos restent dans la galerie.', 'Supprimer'))) return;
+        if (album?.private) {
+          if (!(await confirmBox('Supprimer l\'album privé ?', 'Tout son contenu sera supprimé définitivement.', 'Tout supprimer'))) return;
+          const { data: inside } = await sb.from('media').select('*').eq('album_id', albumId);
+          if (inside?.length) await deleteItems(inside);
+        } else if (!(await confirmBox('Supprimer l\'album ?', 'Les photos et vidéos restent dans la galerie.', 'Supprimer'))) return;
         const { error } = await sb.from('albums').delete().eq('id', albumId);
         if (error) return errToast(error);
         go('#/galerie/albums');
@@ -247,7 +277,7 @@ export function galleryView({ albumId = null, tab = 'all' } = {}) {
     if (albumId) {
       const { data } = await sb.from('albums').select('*').eq('id', albumId).maybeSingle();
       album = data;
-      title.textContent = data?.name || 'Album introuvable';
+      drawTitle();
     }
     load(); loadUsage();
   })();
