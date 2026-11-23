@@ -51,6 +51,19 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   let introSeenAt = 0;
   const nextUp = h('div', { class: 'next-up hidden' });
   const loading = h('div', { class: 'pl-loading' }, h('div', { class: 'spinner' }));
+  const help = h('div', { class: 'pl-help hidden' });
+  function showHelp(stuckNow = true) {
+    const st = `état ${video.readyState}/${video.networkState} · ${video.error ? 'erreur ' + video.error.code : 'pas d\'erreur'} · ${Math.round(video.currentTime)} s`;
+    help.replaceChildren(
+      h('b', {}, stuckNow ? 'La vidéo ne démarre pas ?' : 'Touche ▶ pour lancer la lecture'),
+      stuckNow ? h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' } },
+        h('button', { class: 'btn sm light', onclick: (e) => { e.stopPropagation(); help.classList.add('hidden'); video.play().catch(() => {}); } }, icon('play'), 'Lancer'),
+        h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); help.classList.add('hidden'); retries = 0; recover('manual'); } }, icon('refresh'), 'Réessayer'),
+        video.webkitEnterFullscreen ? h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); try { video.play().catch(() => {}); video.webkitEnterFullscreen(); } catch { /* rien */ } } }, icon('fullscreen'), 'Lecteur iPhone') : null) : null,
+      stuckNow ? h('small', {}, st) : null);
+    help.classList.remove('hidden');
+    if (!stuckNow) setTimeout(() => help.classList.add('hidden'), 3500);
+  }
   const flashL = h('div', { class: 'seek-flash l' }, '−10 s');
   const flashR = h('div', { class: 'seek-flash r' }, '+10 s');
 
@@ -64,7 +77,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
       h('div', { class: 'pl-seek' }, elapsed, track, remain),
       h('div', { class: 'pl-btns' }, volBox, speedBtn, epsBtn, langBtn, subBtn, h('div', { class: 'sp' }), nextBtn, fsBtn)));
 
-  const root = h('div', { class: 'player' }, video, flashL, flashR, loading, ui, skipIntro, nextUp);
+  const root = h('div', { class: 'player' }, video, flashL, flashR, loading, ui, skipIntro, nextUp, help);
   document.body.append(root);
   document.body.style.overflow = 'hidden';
   if (!isIOS) video.volume = savedVol;
@@ -95,11 +108,14 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     if (Math.abs(video.currentTime - lastT) < 0.01) stuck++; else { stuck = 0; retries = 0; }
     lastT = video.currentTime;
     // données disponibles mais image figée : ~6 s ; en attente du réseau : ~16 s
-    if (stuck >= (video.readyState >= 3 ? 3 : 8)) { stuck = 0; recover('stall'); }
+    if (stuck >= (video.readyState >= 3 ? 3 : 8)) { stuck = 0; if (retries >= 2) showHelp(true); else recover('stall'); }
   }, 2000);
 
   // ---------- Chargement d'une vidéo ----------
+  let startAt = 0;
   async function load(e, from) {
+    // « amorce » la vidéo pendant le toucher (iPhone en mode appli exige un geste pour lancer la lecture)
+    try { if (!video.src) { video.muted = true; video.play().catch(() => {}); video.muted = false; } } catch { /* rien */ }
     ep = e;
     clearCountdown();
     flushSession();
@@ -122,15 +138,18 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
         video.append(tr);
         tr.addEventListener('load', () => setSubs(subsOn));
       } else video.removeAttribute('crossorigin');
-      video.src = src;
+      startAt = from > 5 ? from : 0;
+      video.src = startAt ? `${src}#t=${Math.floor(startAt)}` : src;
+      video.load();
       video.playbackRate = SPEEDS[speedIdx];
       video.addEventListener('loadedmetadata', () => {
         const d = video.duration || 0;
-        if (from > 5 && (!d || from < d - 15)) video.currentTime = from;
+        if (startAt && d && startAt >= d - 15) video.currentTime = 0;
+        else if (startAt && Math.abs(video.currentTime - startAt) > 3) video.currentTime = startAt;
         setSubs(subsOn);
         setupLanguages();
       }, { once: true });
-      video.play().catch(() => { loading.classList.add('hidden'); showUI(true); });
+      video.play().catch(() => { loading.classList.add('hidden'); showUI(true); showHelp(false); });
       mediaSession();
     } catch (err) { errToast(err); loading.classList.add('hidden'); }
   }
@@ -242,7 +261,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
 
   // ---------- Événements vidéo ----------
   video.addEventListener('waiting', () => loading.classList.remove('hidden'));
-  video.addEventListener('playing', () => { loading.classList.add('hidden'); showUI(); });
+  video.addEventListener('playing', () => { loading.classList.add('hidden'); help.classList.add('hidden'); showUI(); });
   video.addEventListener('canplay', () => loading.classList.add('hidden'));
   video.addEventListener('play', () => { ppBtn.replaceChildren(icon('pause')); showUI(); });
   video.addEventListener('pause', () => { ppBtn.replaceChildren(icon('play')); showUI(true); persist(); });
@@ -418,4 +437,5 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
 
   load(ep, start);
   showUI();
+  setTimeout(() => { if (!closed && video.currentTime < 0.5 && !video.paused) showHelp(true); }, 12000);
 }
