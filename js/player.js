@@ -1,5 +1,6 @@
 import { h, icon, clock, sheet, errToast, runtime } from './ui.js';
-import { sb, signedUrl, lazyImg } from './api.js';
+import { sb, signedUrl, freshUrl, lazyImg } from './api.js';
+import { releaseAudio } from './intro.js';
 import { uid } from './ui.js';
 import { episodesOf, nextEpisode, saveProgress, progressOf, ratio } from './catalog.js';
 
@@ -71,6 +72,31 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   volUI();
 
   const cur = () => (ep || t);
+  releaseAudio();
+
+  // ---------- Anti-blocage : si l'image ne progresse plus, on recharge la vidéo au même endroit ----------
+  let lastT = -1; let stuck = 0; let recovering = false; let retries = 0;
+  async function recover(reason) {
+    if (recovering || closed || retries >= 3) return;
+    recovering = true; retries++;
+    const at = video.currentTime || 0;
+    const wasPlaying = !video.paused;
+    loading.classList.remove('hidden');
+    try {
+      const src = await freshUrl(cur().video_key);
+      video.src = src;
+      video.addEventListener('loadedmetadata', () => { if (at > 1) video.currentTime = at; setupLanguages(); setSubs(subsOn); }, { once: true });
+      if (wasPlaying || reason === 'stall') video.play().catch(() => showUI(true));
+    } catch (e) { errToast(e); }
+    setTimeout(() => { recovering = false; }, 4000);
+  }
+  const watchdog = setInterval(() => {
+    if (video.paused || video.seeking || video.ended || !video.src || recovering) { stuck = 0; lastT = video.currentTime; return; }
+    if (Math.abs(video.currentTime - lastT) < 0.01) stuck++; else { stuck = 0; retries = 0; }
+    lastT = video.currentTime;
+    // données disponibles mais image figée : ~6 s ; en attente du réseau : ~16 s
+    if (stuck >= (video.readyState >= 3 ? 3 : 8)) { stuck = 0; recover('stall'); }
+  }, 2000);
 
   // ---------- Chargement d'une vidéo ----------
   async function load(e, from) {
@@ -252,7 +278,10 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   });
   video.addEventListener('error', () => {
     loading.classList.add('hidden');
-    if (video.error && video.src) errToast('Lecture impossible. Format non pris en charge (utilise du MP4 H.264) ou lien expiré.');
+    if (!video.error || !video.src) return;
+    // lien expiré ou coupure réseau : on réessaie avec un lien neuf, puis on affiche l'erreur
+    if (retries < 3 && video.error.code !== 4) { recover('error'); return; }
+    errToast(video.error.code === 4 ? 'Format vidéo non pris en charge sur cet appareil.' : 'Lecture impossible, vérifie ta connexion.');
   });
 
   // ---------- Suivi du temps de visionnage (visible par l'admin) ----------
@@ -357,7 +386,10 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     else if (e.key === 'Escape' && !document.fullscreenElement) exit();
   };
   document.addEventListener('keydown', onKey);
-  const onHide = () => { if (document.visibilityState === 'hidden') { persist(); flushSession(); } };
+  const onHide = () => {
+    if (document.visibilityState === 'hidden') { persist(); flushSession(); }
+    else { stuck = 0; lastT = video.currentTime; }
+  };
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', persist);
 
@@ -367,6 +399,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     persist();
     flushSession();
     clearInterval(tick);
+    clearInterval(watchdog);
     clearCountdown();
     video.pause();
     video.removeAttribute('src'); video.load();

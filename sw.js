@@ -1,8 +1,8 @@
 // Service worker Blourr : coque de l'appli disponible hors ligne, mises à jour en priorité réseau
-const VERSION = 'blourr-v5';
+const VERSION = 'blourr-v6';
 const SHELL = [
-  './', './index.html', './manifest.webmanifest', './css/app.css?v=5',
-  './js/main.js?v=5', './js/api.js', './js/ui.js', './js/router.js', './js/auth.js', './js/gallery.js',
+  './', './index.html', './manifest.webmanifest', './css/app.css?v=6',
+  './js/main.js?v=6', './js/api.js', './js/ui.js', './js/router.js', './js/auth.js', './js/gallery.js',
   './js/media.js', './js/catalog.js', './js/cine.js', './js/player.js', './js/studio.js', './js/profile.js', './js/intro.js', './js/family.js', './js/donate.js', './js/vendor/supabase.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon.png',
 ];

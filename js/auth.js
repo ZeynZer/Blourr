@@ -32,7 +32,7 @@ export function authView() {
   const form = h('form', {
     onsubmit: async (e) => {
       e.preventDefault();
-      unlockAudio();
+      if (!sessionStorage.getItem('blourr-intro')) unlockAudio();
       err.textContent = '';
       btn.disabled = true;
       const old = btn.textContent;

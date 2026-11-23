@@ -77,6 +77,10 @@ export function signedUrl(key) {
     if (!qTimer) qTimer = setTimeout(flush, 25);
   });
 }
+export function freshUrl(key) {
+  cache.delete(key);
+  return signedUrl(key);
+}
 export async function downloadUrl(key, name) {
   const { urls } = await r2('sign-get', { keys: [key], downloads: { [key]: name } });
   return urls[key];

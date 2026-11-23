@@ -114,4 +114,4 @@ if ('serviceWorker' in navigator) {
 }
 
 // le premier toucher débloque le son (exigence de l'iPhone)
-document.addEventListener('pointerdown', unlockAudio, { once: true, capture: true });
+// (le son du générique n'est débloqué que juste avant de le jouer, puis libéré)

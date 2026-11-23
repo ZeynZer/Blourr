@@ -10,6 +10,11 @@ function audio() {
   } catch { return null; }
 }
 // Débloque le son au premier toucher (l'iPhone interdit le son sans interaction)
+export function releaseAudio() {
+  if (!ctx) return;
+  const c = ctx; ctx = null;
+  try { c.close(); } catch { /* rien */ }
+}
 export function unlockAudio() { const a = audio(); if (a) { const b = a.createBuffer(1, 1, 22050); const s = a.createBufferSource(); s.buffer = b; s.connect(a.destination); s.start(0); } }
 
 function sound() {
@@ -56,9 +61,10 @@ export function playIntro() {
       h('div', { class: 'intro-b' }, h('span', { class: 'intro-glow' }, 'B'), h('span', { class: 'intro-letter' }, 'B'), rays));
     let done = false;
     const finish = () => { if (done) return; done = true; el.classList.add('out'); setTimeout(() => { el.remove(); resolve(); }, 450); };
-    el.addEventListener('click', () => { if (!sound.played) { unlockAudio(); } finish(); });
+    el.addEventListener('click', () => finish());
     document.body.append(el);
     sound.played = sound();
     setTimeout(finish, 3000);
+    setTimeout(releaseAudio, 4200);
   });
 }
