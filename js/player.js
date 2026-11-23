@@ -1,6 +1,7 @@
 import { h, icon, clock, sheet, errToast, toast, runtime } from './ui.js';
 import { sb, signedUrl, freshUrl, lazyImg } from './api.js';
 import { releaseAudio } from './intro.js';
+import { localSources, setLocalProgress } from './downloads.js';
 import { uid } from './ui.js';
 import { episodesOf, nextEpisode, saveProgress, progressOf, ratio } from './catalog.js';
 
@@ -81,7 +82,8 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     const wasPlaying = !video.paused;
     loading.classList.remove('hidden');
     try {
-      const src = await freshUrl(cur().video_key);
+      const local = isLocal ? await localSources(cur().id) : null;
+      const src = local ? local.video : await freshUrl(cur().video_key);
       video.src = src;
       video.addEventListener('loadedmetadata', () => { if (at > 1) video.currentTime = at; setupLanguages(); setSubs(subsOn); }, { once: true });
       if (wasPlaying || reason === 'stall') video.play().catch(() => showUI(true));
@@ -146,7 +148,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   }, 2000);
 
   // ---------- Chargement d'une vidéo ----------
-  let startAt = 0;
+  let startAt = 0; let isLocal = false;
   async function load(e, from) {
     // « amorce » la vidéo pendant le toucher (iPhone en mode appli exige un geste pour lancer la lecture)
     ep = e;
@@ -162,7 +164,9 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     video.querySelectorAll('track').forEach((tr) => tr.remove());
     const item = cur();
     try {
-      const [src, sub] = await Promise.all([signedUrl(item.video_key), item.subtitle_key ? signedUrl(item.subtitle_key) : null]);
+      const local = await localSources(item.id);
+      isLocal = !!local;
+      const [src, sub] = local ? [local.video, local.sub] : await Promise.all([signedUrl(item.video_key), item.subtitle_key ? signedUrl(item.subtitle_key) : null]);
       if (closed) return;
       subBtn.classList.toggle('hidden', !sub);
       if (sub) {
@@ -172,7 +176,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
         tr.addEventListener('load', () => setSubs(subsOn));
       } else video.removeAttribute('crossorigin');
       startAt = from > 5 ? from : 0;
-      video.src = startAt ? `${src}#t=${Math.floor(startAt)}` : src;
+      video.src = startAt && !isLocal ? `${src}#t=${Math.floor(startAt)}` : src;
       video.load();
       video.playbackRate = SPEEDS[speedIdx];
       video.addEventListener('loadedmetadata', () => {
@@ -365,6 +369,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     lastSave = Date.now();
     const pos = finished ? video.duration : video.currentTime;
     if (pos < 3 && !finished) return;
+    setLocalProgress(cur().id, finished ? 0 : pos);
     saveProgress(t, ep, pos, video.duration).catch(() => {});
   }
 

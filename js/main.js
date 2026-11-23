@@ -7,6 +7,8 @@ import { cineView } from './cine.js';
 import { studioView } from './studio.js';
 import { profileView } from './profile.js';
 import { familyView } from './family.js';
+import { downloadsView } from './downloads.js';
+import { openPlayer } from './player.js';
 import { playIntro, unlockAudio } from './intro.js';
 
 const app = document.getElementById('app');
@@ -41,8 +43,9 @@ function route() {
   else if (sec === 'studio') view = studioView(p.slice(1));
   else if (sec === 'profil') view = profileView();
   else if (sec === 'famille') view = familyView();
+  else if (sec === 'telechargements') view = downloadsView({ openPlayer });
   else { go('#/cine', true); return; }
-  const navSec = sec === 'album' ? 'galerie' : sec === 'studio' ? 'cine' : sec;
+  const navSec = sec === 'album' ? 'galerie' : (sec === 'studio' || sec === 'telechargements') ? 'cine' : sec;
   nav?.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.dataset.sec === navSec));
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', navSec === 'cine' ? '#0c0c0e' : '#07070b');
   mount(view);
@@ -63,7 +66,20 @@ function startPresence() {
 }
 async function enter(session) {
   state.session = session;
-  const { data: profile, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+  let { data: profile, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle().then((r) => r, (e) => ({ error: e }));
+  // Hors connexion : on reprend le profil gardé sur l'appareil et on ouvre les téléchargements
+  const offlineErr = error && (!navigator.onLine || /fetch|network|load failed/i.test(error.message || ''));
+  if (offlineErr) {
+    try { profile = JSON.parse(localStorage.getItem('blourr-profile') || 'null'); } catch { profile = null; }
+    if (profile && profile.id === session.user.id) {
+      state.session = session; state.profile = profile; state.isAdmin = profile.role === 'admin'; state.offline = true;
+      if (!nav) buildNav();
+      history.replaceState(null, '', '#/telechargements');
+      route();
+      return;
+    }
+  }
+  if (!error && profile) { try { localStorage.setItem('blourr-profile', JSON.stringify(profile)); } catch { /* rien */ } }
   if (error || !profile) {
     errToast(error?.message || 'Ce compte n\'est pas rattaché à la famille.');
     await sb.auth.signOut();
@@ -86,6 +102,7 @@ async function enter(session) {
 }
 
 function leave() {
+  if (state.offline) return; // hors connexion : on reste sur les téléchargements
   sessionStorage.removeItem('blourr-intro');
   state.session = null; state.profile = null; state.isAdmin = false;
   nav?.remove(); nav = null;
@@ -115,3 +132,19 @@ if ('serviceWorker' in navigator) {
 
 // le premier toucher débloque le son (exigence de l'iPhone)
 // (le son du générique n'est débloqué que juste avant de le jouer, puis libéré)
+
+// retour de connexion après un démarrage hors ligne : on recharge pour tout récupérer
+window.addEventListener('online', () => { if (state.offline) location.reload(); });
+
+// Démarrage sans réseau : on ouvre directement les téléchargements avec le profil gardé sur l'appareil
+if (!navigator.onLine) {
+  try {
+    const p = JSON.parse(localStorage.getItem('blourr-profile') || 'null');
+    if (p) {
+      state.profile = p; state.isAdmin = p.role === 'admin'; state.offline = true;
+      buildNav();
+      history.replaceState(null, '', '#/telechargements');
+      route();
+    }
+  } catch { /* rien */ }
+}

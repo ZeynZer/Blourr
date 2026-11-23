@@ -2,6 +2,7 @@ import { h, icon, errToast, toast, runtime, avatar, confirmBox, dateFr } from '.
 import { sb, state, lazyImg, bgInto } from './api.js';
 import { cat, loadCatalog, titleById, sagaById, episodesOf, sagaTitles, progressOf, ratio, resumeTarget, continueWatching, toggleList, toggleFav, isPlayable } from './catalog.js';
 import { openPlayer } from './player.js';
+import { downloadButton, startMany, supported as dlSupported } from './downloads.js';
 import { go } from './router.js';
 
 const DAY = 86400000;
@@ -60,6 +61,7 @@ function topBar(active) {
       [['series', 'Séries'], ['films', 'Films'], ['liste', 'Ma liste'], ['demandes', 'Demandes']].map(([k, l]) =>
         h('button', { class: (active === k ? 'active' : '') + (k === 'demandes' ? ' l-req' : ''), onclick: () => go(active === k ? '#/cine' : '#/cine/' + k) }, l))),
     h('button', { class: 'icon-btn plain only-mobile' + (active === 'demandes' ? ' on' : ''), title: 'Demandes', onclick: () => go('#/cine/demandes') }, icon('bulb')),
+    h('button', { class: 'icon-btn plain', title: 'Mes téléchargements', onclick: () => go('#/telechargements') }, icon('download')),
     h('button', { class: 'icon-btn plain', title: 'Rechercher', onclick: () => go('#/cine/recherche') }, icon('search')),
     state.isAdmin ? h('button', { class: 'icon-btn plain', title: 'Studio', onclick: () => go('#/studio') }, icon('settings')) : null);
   const onScroll = () => bar.classList.toggle('solid', window.scrollY > 40);
@@ -286,6 +288,7 @@ export async function openDetail(id) {
           h('button', { onclick: async () => { try { await toggleList(t.id); render(); } catch (e) { errToast(e); } } }, icon(inList ? 'check' : 'plus'), 'Ma liste'),
           h('button', { onclick: async () => { try { const on = await toggleFav(t.id); render(); if (on) toast('Ajouté à tes préférés ❤️'); } catch (e) { errToast(e); } } },
             (() => { const i = icon(cat.favs.has(t.id) ? 'heartf' : 'heart'); if (cat.favs.has(t.id)) i.style.color = 'var(--cine-red)'; return i; })(), 'J\'adore'),
+          t.kind === 'movie' && t.video_key && dlSupported() ? downloadButton(t) : null,
           navigator.share ? h('button', { onclick: () => navigator.share({ title: t.name, text: `Regarde « ${t.name} » sur Blourr`, url: location.origin + location.pathname }).catch(() => {}) }, icon('share'), 'Partager') : null,
           state.isAdmin ? h('button', { onclick: () => { close(); go('#/studio/t/' + t.id); } }, icon('edit'), 'Modifier') : null),
         t.kind === 'series' ? episodesBlock(t, close) : null,
@@ -339,7 +342,7 @@ function episodesBlock(t, closeDetail) {
           h('div', { class: 'pi' }, h('span', {}, icon('play'))),
           p > 0.01 ? h('div', { class: 'prog' }, h('i', { style: { width: p * 100 + '%' } })) : null),
         h('div', { class: 'ei' },
-          h('div', { class: 't' }, `${e.number}. ${e.name || 'Épisode ' + e.number}`, h('span', {}, runtime(e.duration))),
+          h('div', { class: 't' }, `${e.number}. ${e.name || 'Épisode ' + e.number}`, h('span', { class: 'ep-r' }, runtime(e.duration), e.video_key && dlSupported() ? downloadButton(t, e, { compact: true }) : null)),
           e.description ? h('p', {}, e.description) : null,
           !e.video_key ? h('p', { style: { color: '#f59e0b' } }, 'Vidéo manquante') : null));
     }));
@@ -347,6 +350,7 @@ function episodesBlock(t, closeDetail) {
   draw();
   return h('div', { class: 'd-section' },
     h('div', { class: 'd-section-h' }, h('h4', {}, 'Épisodes'), seasons.length > 1 ? sel : h('span', { class: 'muted' }, `Saison ${current}`)),
+    dlSupported() ? h('button', { class: 'btn sm', style: { marginBottom: '6px' }, onclick: () => { startMany(t, eps.filter((e) => e.season === current)); toast(`Saison ${current} ajoutée aux téléchargements`); } }, icon('download'), `Télécharger la saison ${current}`) : null,
     list);
 }
 
