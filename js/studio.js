@@ -67,12 +67,12 @@ export function studioView(sub = []) {
     jobsBox.replaceChildren(h('div', { style: { padding: '0 16px 6px', fontWeight: 800, fontSize: '17px' } }, '☁️ Conversions'),
       ...jobs.map((j) => {
         const pct = Math.round((j.progress || 0) * 100);
-        const st = j.status === 'done' ? `Prêt · ${bytes(j.size)}` : j.status === 'error' ? `Échec : ${j.error || ''}` : j.status === 'queued' ? 'En attente d\'un serveur… (1 à 2 min)' : `${j.step || 'Conversion'} · ${pct} %`;
+        const st = j.status === 'done' ? `Prêt · ${bytes(j.size)}` : j.status === 'error' ? `Échec : ${j.error || ''}` : j.status === 'queued' ? (Date.now() - new Date(j.updated_at).getTime() > 5 * 60000 ? 'Pas encore démarré : touche ↻ pour relancer' : 'En attente d\'un serveur… (1 à 2 min)') : `${j.step || 'Conversion'} · ${pct} %`;
         return h('div', { class: 'studio-item', style: { cursor: 'default' } },
           h('div', { class: 'meta' }, h('b', {}, j.label || 'Vidéo'),
             h('span', { style: { color: j.status === 'error' ? 'var(--danger)' : j.status === 'done' ? 'var(--ok)' : '#999' } }, st),
             j.status === 'running' || j.status === 'queued' ? h('div', { class: 'bar', style: { marginTop: '6px' } }, h('i', { style: { width: Math.max(2, pct) + '%' } })) : null),
-          j.status === 'error' ? h('button', { class: 'icon-btn', title: 'Relancer', onclick: async () => { try { await encode('retry', { id: j.id }); toast('Conversion relancée'); loadJobs(); } catch (e) { errToast(e); } } }, icon('refresh')) : null,
+          j.status === 'error' || (j.status === 'queued' && Date.now() - new Date(j.updated_at).getTime() > 5 * 60000) ? h('button', { class: 'icon-btn', title: 'Relancer', onclick: async () => { try { await encode('retry', { id: j.id }); toast('Conversion relancée'); loadJobs(); } catch (e) { errToast(e); } } }, icon('refresh')) : null,
           j.status !== 'running' ? h('button', { class: 'icon-btn', title: j.status === 'done' ? 'Masquer' : 'Annuler', onclick: async () => {
             if (j.status !== 'done' && !(await confirmBox('Annuler cette conversion ?', 'Le fichier source sera supprimé.', 'Annuler la conversion'))) return;
             try { await encode('cancel', { id: j.id }); loadJobs(); } catch (e) { errToast(e); }
