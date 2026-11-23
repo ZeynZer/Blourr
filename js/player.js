@@ -30,6 +30,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   const elapsed = h('span', {}, '0:00');
   const subBtn = h('button', { class: 'hidden', onclick: () => setSubs(!subsOn) }, icon('subtitles'), 'Sous-titres');
   const speedBtn = h('button', { onclick: () => { speedIdx = (speedIdx + 1) % SPEEDS.length; video.playbackRate = SPEEDS[speedIdx]; speedBtn.lastChild.textContent = `Vitesse (${String(SPEEDS[speedIdx]).replace('.', ',')}x)`; } }, icon('speed'), h('span', {}, 'Vitesse (1x)'));
+  const langBtn = h('button', { class: 'hidden', onclick: () => languageSheet() }, icon('volume'), h('span', {}, 'Langue'));
   const epsBtn = h('button', { class: t.kind === 'series' ? '' : 'hidden', onclick: () => episodesSheet() }, icon('episodes'), 'Épisodes');
   const nextBtn = h('button', { class: 'hidden', onclick: () => goNext() }, icon('nextep'), 'Épisode suivant');
   // Sur iPhone, le plein écran natif masquerait nos boutons : on propose un zoom (remplir l'écran) à la place
@@ -60,7 +61,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
       h('button', { class: 'sk', onclick: (e) => { e.stopPropagation(); seekBy(10); } }, icon('fwd10'))),
     h('div', { class: 'pl-bot' },
       h('div', { class: 'pl-seek' }, elapsed, track, remain),
-      h('div', { class: 'pl-btns' }, volBox, speedBtn, epsBtn, subBtn, h('div', { class: 'sp' }), nextBtn, fsBtn)));
+      h('div', { class: 'pl-btns' }, volBox, speedBtn, epsBtn, langBtn, subBtn, h('div', { class: 'sp' }), nextBtn, fsBtn)));
 
   const root = h('div', { class: 'player' }, video, flashL, flashR, loading, ui, skipIntro, nextUp);
   document.body.append(root);
@@ -101,10 +102,43 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
         const d = video.duration || 0;
         if (from > 5 && (!d || from < d - 15)) video.currentTime = from;
         setSubs(subsOn);
+        setupLanguages();
       }, { once: true });
       video.play().catch(() => { loading.classList.add('hidden'); showUI(true); });
       mediaSession();
     } catch (err) { errToast(err); loading.classList.add('hidden'); }
+  }
+
+  // ---------- Langues (pistes audio multiples, lues par Safari / iPhone) ----------
+  const LANG_NAMES = { fr: 'Français', fre: 'Français', fra: 'Français', en: 'Anglais', eng: 'Anglais', ja: 'Japonais', jpn: 'Japonais', es: 'Espagnol', spa: 'Espagnol', ar: 'Arabe', ara: 'Arabe', de: 'Allemand', ger: 'Allemand', deu: 'Allemand', it: 'Italien', ita: 'Italien', ko: 'Coréen', kor: 'Coréen' };
+  const trackName = (tr, i) => LANG_NAMES[(tr.language || '').toLowerCase()] || tr.label || `Piste ${i + 1}`;
+  const tracks = () => (video.audioTracks ? [...video.audioTracks] : []);
+  function currentTrack() { return tracks().findIndex((t) => t.enabled); }
+  function selectTrack(i) {
+    tracks().forEach((t, j) => { t.enabled = j === i; });
+    const t = tracks()[i];
+    try { localStorage.setItem('blourr-lang', (t.language || '').toLowerCase()); } catch { /* rien */ }
+    langBtn.lastChild.textContent = trackName(t, i);
+  }
+  function setupLanguages() {
+    const list = tracks();
+    langBtn.classList.toggle('hidden', list.length < 2);
+    if (list.length < 2) return;
+    let pref = null;
+    try { pref = localStorage.getItem('blourr-lang'); } catch { /* rien */ }
+    const same = (a, b) => (LANG_NAMES[a] || a) === (LANG_NAMES[b] || b);
+    const i = pref ? list.findIndex((t) => same((t.language || '').toLowerCase(), pref)) : -1;
+    if (i >= 0 && i !== currentTrack()) selectTrack(i);
+    else { const c = Math.max(0, currentTrack()); langBtn.lastChild.textContent = trackName(list[c], c); }
+  }
+  function languageSheet() {
+    const list = tracks();
+    const cur = currentTrack();
+    sheet((close) => [
+      h('h2', {}, 'Langue'),
+      list.map((t, i) => h('button', { class: 'list-btn', onclick: () => { selectTrack(i); close(); } },
+        icon(i === cur ? 'check' : 'volume'), trackName(t, i))),
+    ]);
   }
 
   function setSubs(on) {
