@@ -50,6 +50,8 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   let introSeenAt = 0;
   const nextUp = h('div', { class: 'next-up hidden' });
   const loading = h('div', { class: 'pl-loading' }, h('div', { class: 'spinner' }));
+  const flashL = h('div', { class: 'seek-flash l' }, '−10 s');
+  const flashR = h('div', { class: 'seek-flash r' }, '+10 s');
   const ui = h('div', { class: 'pl-ui' },
     h('div', { class: 'pl-top' }, h('button', { class: 'icon-btn plain', onclick: () => exit() }, icon('back')), ttl, h('div', { style: { width: '40px' } })),
     h('div', { class: 'pl-mid' },
@@ -69,7 +71,6 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
 
   const cur = () => (ep || t);
   releaseAudio();
-  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* rien */ }
 
   // ---------- Anti-blocage : si l'image ne progresse plus, on recharge la vidéo au même endroit ----------
   let lastT = -1; let stuck = 0; let recovering = false; let retries = 0;
