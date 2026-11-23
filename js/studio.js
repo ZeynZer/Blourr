@@ -1,5 +1,5 @@
 import { h, icon, toast, errToast, sheet, confirmBox, bytes, runtime, clock, parseClock, uid, ext, avatar, dateFr } from './ui.js';
-import { sb, state, lazyImg, bgInto, putUrls, putFile, removeKeys } from './api.js';
+import { sb, state, lazyImg, bgInto, putUrls, putFile, removeKeys, encode } from './api.js';
 import { cat, loadCatalog, titleById, episodesOf, sagaTitles } from './catalog.js';
 import { resizeImage, videoInfo, toVtt, guessName, parseEpisode, episodeName } from './media.js';
 import { go } from './router.js';
@@ -55,6 +55,33 @@ export function studioView(sub = []) {
   const root = h('div', { class: 'view cine studio' });
   const body = h('div', {}, h('div', { class: 'center-load' }, h('div', { class: 'spinner' })));
   root.append(header('Studio', '#/cine'), body);
+  const jobsBox = h('div');
+  let jobsTimer = null;
+  async function loadJobs() {
+    const { data } = await sb.from('encode_jobs').select('id, label, status, progress, step, error, size, src_size, options, created_at, updated_at').order('created_at', { ascending: false }).limit(30);
+    const jobs = (data || []).filter((j) => j.status !== 'done' || Date.now() - new Date(j.updated_at).getTime() < 3 * 86400000);
+    const active = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+    clearTimeout(jobsTimer);
+    if (active) jobsTimer = setTimeout(async () => { const was = active; await loadJobs(); if (was && !jobs.some((j) => j.status === 'running' || j.status === 'queued')) loadCatalog(true); }, 8000);
+    if (!jobs.length) { jobsBox.replaceChildren(); return; }
+    jobsBox.replaceChildren(h('div', { style: { padding: '0 16px 6px', fontWeight: 800, fontSize: '17px' } }, '☁️ Conversions'),
+      ...jobs.map((j) => {
+        const pct = Math.round((j.progress || 0) * 100);
+        const st = j.status === 'done' ? `Prêt · ${bytes(j.size)}` : j.status === 'error' ? `Échec : ${j.error || ''}` : j.status === 'queued' ? 'En attente d\'un serveur… (1 à 2 min)' : `${j.step || 'Conversion'} · ${pct} %`;
+        return h('div', { class: 'studio-item', style: { cursor: 'default' } },
+          h('div', { class: 'meta' }, h('b', {}, j.label || 'Vidéo'),
+            h('span', { style: { color: j.status === 'error' ? 'var(--danger)' : j.status === 'done' ? 'var(--ok)' : '#999' } }, st),
+            j.status === 'running' || j.status === 'queued' ? h('div', { class: 'bar', style: { marginTop: '6px' } }, h('i', { style: { width: Math.max(2, pct) + '%' } })) : null),
+          j.status === 'error' ? h('button', { class: 'icon-btn', title: 'Relancer', onclick: async () => { try { await encode('retry', { id: j.id }); toast('Conversion relancée'); loadJobs(); } catch (e) { errToast(e); } } }, icon('refresh')) : null,
+          j.status !== 'running' ? h('button', { class: 'icon-btn', title: j.status === 'done' ? 'Masquer' : 'Annuler', onclick: async () => {
+            if (j.status !== 'done' && !(await confirmBox('Annuler cette conversion ?', 'Le fichier source sera supprimé.', 'Annuler la conversion'))) return;
+            try { await encode('cancel', { id: j.id }); loadJobs(); } catch (e) { errToast(e); }
+          } }, icon('x')) : null);
+      }),
+      h('div', { style: { height: '10px' } }));
+  }
+  root.cleanup = () => clearTimeout(jobsTimer);
+  loadJobs().catch(() => {});
 
   (async () => {
     await loadCatalog(true);
@@ -65,6 +92,7 @@ export function studioView(sub = []) {
         h('button', { class: 'btn grow', onclick: () => go('#/studio/sagas') }, icon('layers'), 'Sagas'),
         h('button', { class: 'btn grow', onclick: () => go('#/studio/activite') }, icon('chart'), 'Activité')),
       state.configured === false ? h('div', { class: 'banner' }, icon('cloud'), h('div', {}, 'Configure d\'abord le stockage dans ', h('a', { href: '#/profil', style: { textDecoration: 'underline' } }, 'Profil'), '.')) : null,
+      jobsBox,
       cat.titles.length ? null : h('div', { class: 'empty' }, h('div', { class: 'em-ic' }, icon('film')), h('h3', {}, 'Rien pour l\'instant'), h('p', {}, 'Ajoute ton premier film ou ta première série.')),
       cat.titles.map((t) => {
         const eps = episodesOf(t.id);
@@ -148,25 +176,32 @@ function titleEditor(id, newKind) {
     const subLabel = h('div', { class: 'small muted' }, t.subtitle_key ? 'Sous-titres en ligne' : 'Pas de sous-titres (.srt ou .vtt)');
     const introS = h('input', { class: 'input', value: t.intro_start != null ? clock(t.intro_start) : '', placeholder: '0:00' });
     const introE = h('input', { class: 'input', value: t.intro_end != null ? clock(t.intro_end) : '', placeholder: '1:30' });
+    const encOpts = encodeOptions();
+    const encBox = h('div', { class: 'hidden', style: { marginTop: '10px' } });
     const videoBox = t.kind === 'movie' ? h('div', { class: 'vid-box' },
       h('div', { style: { fontWeight: 700, marginBottom: '6px' } }, 'Vidéo du film'),
       vidLabel,
       h('div', { class: 'row', style: { marginTop: '10px' } },
         h('button', { class: 'btn sm', onclick: async () => {
-          const [f] = await pick('video/*,.mp4,.mov,.m4v,.webm,.mkv'); if (!f) return;
+          const [f] = await pick('video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi'); if (!f) return;
+          if (!name.value) name.value = guessName(f.name);
+          const needs = NEEDS_CONVERT.test(f.name);
+          pending.video = { file: f, duration: null };
+          encBox.replaceChildren(encOpts.el); encBox.classList.remove('hidden');
+          encOpts.setOn(needs);
+          if (needs) { vidLabel.textContent = `Prête : ${f.name} · ${bytes(f.size)} — sera convertie en MP4 dans le cloud`; return; }
           vidLabel.textContent = 'Analyse de la vidéo…';
           const info = await videoInfo(f, { max: 1600 });
-          pending.video = { file: f, duration: info.duration };
+          pending.video.duration = info.duration;
           if (info.thumb) pending.autoBackdrop = info.thumb;
-          if (!name.value) name.value = guessName(f.name);
           vidLabel.textContent = `Prête à envoyer : ${f.name} · ${bytes(f.size)} · ${runtime(info.duration)}`;
-          if (/\.(mkv|avi)$/i.test(f.name)) toast('Attention : le .mkv ne se lit pas sur iPhone. Préfère du .mp4 (H.264).', 'err');
         } }, icon('upload'), t.video_key ? 'Remplacer la vidéo' : 'Choisir la vidéo'),
         h('button', { class: 'btn sm', onclick: async () => {
           const [f] = await pick('.srt,.vtt,text/vtt'); if (!f) return;
           pending.sub = await toVtt(f); subLabel.textContent = `Prêts : ${f.name}`;
         } }, icon('subtitles'), 'Sous-titres')),
       subLabel,
+      encBox,
       h('div', { class: 'row', style: { marginTop: '12px' } },
         h('div', { class: 'field grow', style: { margin: 0 } }, h('label', {}, 'Début de l\'intro'), introS),
         h('div', { class: 'field grow', style: { margin: 0 } }, h('label', {}, 'Fin de l\'intro'), introE)),
@@ -192,7 +227,13 @@ function titleEditor(id, newKind) {
         const back = pending.backdrop || (!t.backdrop_key && pending.autoBackdrop);
         if (back) { row.backdrop_key = `c/${t.id}/backdrop_${v}.jpg`; files.push({ key: row.backdrop_key, body: back, type: 'image/jpeg', label: 'Image de fond' }); old.push(t.backdrop_key); }
         if (pending.sub) { row.subtitle_key = `c/${t.id}/sub_${v}.vtt`; files.push({ key: row.subtitle_key, body: pending.sub, type: 'text/vtt', label: 'Sous-titres' }); old.push(t.subtitle_key); }
-        if (pending.video) {
+        let srcJob = null;
+        if (pending.video && encOpts.on()) {
+          // envoi du fichier source : la conversion en MP4 se fait dans le cloud
+          const f = pending.video.file;
+          srcJob = { key: `c/${t.id}/src/${v}.${ext(f.name)}`, size: f.size };
+          files.push({ key: srcJob.key, body: f, type: 'application/octet-stream', label: 'Vidéo source' });
+        } else if (pending.video) {
           const f = pending.video.file;
           row.video_key = `c/${t.id}/video_${v}.${ext(f.name)}`; row.video_size = f.size; row.duration = pending.video.duration || null;
           files.push({ key: row.video_key, body: f, type: f.type || 'video/mp4', label: 'Vidéo' }); old.push(t.video_key);
@@ -201,6 +242,11 @@ function titleEditor(id, newKind) {
         modal.set(1, 'Enregistrement…');
         const { error } = await sb.from('titles').upsert(row);
         if (error) throw error;
+        if (srcJob) {
+          modal.set(1, 'Lancement de la conversion…');
+          await encode('create', { target_type: 'movie', target_id: t.id, src_key: srcJob.key, src_size: srcJob.size, options: encOpts.get(), label: row.name });
+          toast('Conversion lancée : suis-la dans le Studio');
+        }
         await removeKeys(old.filter(Boolean)).catch(() => {});
         await loadCatalog(true);
         modal.close();
@@ -271,6 +317,35 @@ function episodesEditor(t) {
 }
 
 const VIDEO_RE = /\.(mp4|m4v|mov|webm|mkv|avi)$/i;
+const NEEDS_CONVERT = /\.(mkv|avi|webm|wmv|flv|ts|m2ts)$/i;
+
+// Options de conversion dans le cloud (qualité, images/s, langues, sous-titres)
+function encodeOptions(defaults = {}) {
+  const sel = (opts, val) => h('select', { class: 'select' }, opts.map(([v, l]) => h('option', { value: v, selected: v === val }, l)));
+  const quality = sel([['source', 'Garder l\'original'], ['1080', '1080p max'], ['720', '720p (plus léger)']], defaults.quality || 'source');
+  const fps = sel([['source', 'Garder'], ['24', '24 i/s'], ['30', '30 i/s']], defaults.fps || 'source');
+  const langs = sel([['both', 'VF + VO'], ['vf', 'VF seule'], ['vo', 'VO seule']], defaults.langs || 'both');
+  const subs = sel([['none', 'Non'], ['fr', 'Oui (si présents)']], defaults.subs || 'none');
+  const sw = h('input', { type: 'checkbox', checked: true });
+  const grid = h('div', { class: 'enc-grid' },
+    h('div', { class: 'field' }, h('label', {}, 'Qualité'), quality),
+    h('div', { class: 'field' }, h('label', {}, 'Images / s'), fps),
+    h('div', { class: 'field' }, h('label', {}, 'Langues'), langs),
+    h('div', { class: 'field' }, h('label', {}, 'Sous-titres FR'), subs));
+  const el = h('div', { class: 'enc-box' },
+    h('div', { class: 'row', style: { justifyContent: 'space-between', marginBottom: '8px' } },
+      h('div', {}, h('b', {}, '☁️ Convertir dans le cloud'), h('div', { class: 'small muted' }, 'Le fichier devient un MP4 lisible partout, puis l\'original est supprimé.')),
+      h('label', { class: 'switch' }, sw, h('span'))),
+    grid);
+  sw.addEventListener('change', () => grid.classList.toggle('hidden', !sw.checked));
+  return {
+    el,
+    on: () => sw.checked,
+    setOn: (v) => { sw.checked = v; grid.classList.toggle('hidden', !v); },
+    get: () => ({ quality: quality.value, fps: fps.value, langs: langs.value, subs: subs.value }),
+  };
+}
+
 const SUB_RE = /\.(srt|vtt)$/i;
 const baseOf = (n) => n.replace(/\.[^.]+$/, '').toLowerCase();
 
@@ -330,7 +405,7 @@ async function addEpisodes(t, after, folder = false) {
       nIn.onchange = () => { r.manualN = parseInt(nIn.value, 10) || null; draw(); };
       nameIn.oninput = () => { r.name = nameIn.value.trim() || null; };
       const clash = existing.find((e) => e.season === r.season && e.number === r.number);
-      const bad = /\.(mkv|avi)$/i.test(r.file.name);
+      const bad = NEEDS_CONVERT.test(r.file.name) && !encOpts.on();
       return h('div', { style: { padding: '10px 0', borderBottom: '1px solid var(--line)' } },
         h('div', { class: 'row' },
           h('span', { class: 'small muted' }, 'S'), sIn, h('span', { class: 'small muted' }, 'É'), nIn,
@@ -343,6 +418,10 @@ async function addEpisodes(t, after, folder = false) {
           bad ? h('span', { style: { color: 'var(--danger)' } }, ' · .mkv/.avi illisible sur iPhone') : null));
     }));
   }
+  const encOpts = encodeOptions();
+  const anyConvert = rows.some((r) => NEEDS_CONVERT.test(r.file.name));
+  encOpts.setOn(anyConvert);
+  encOpts.el.addEventListener('change', draw);
   seasonIn.addEventListener('input', draw);
   draw();
 
@@ -351,11 +430,12 @@ async function addEpisodes(t, after, folder = false) {
     h('p', { class: 'muted small', style: { marginTop: '-8px' } }, 'Saisons et numéros sont devinés depuis les noms (S01E03, « - 12 », Ep 5…) et les dossiers (« Saison 2 »). Vérifie et corrige si besoin.'),
     h('div', { class: 'field', style: { marginBottom: '6px' } }, h('label', {}, 'Saison par défaut (si non détectée)'), seasonIn),
     summary, listEl,
-    h('button', { class: 'btn primary block', onclick: () => { close(); sendEpisodes(t, rows.filter((r) => r.keep), existing, after); } }, icon('upload'), 'Tout envoyer'),
+    anyConvert ? h('div', { style: { marginBottom: '12px' } }, encOpts.el, h('p', { class: 'small muted', style: { margin: '6px 0 0' } }, 'S\'applique aux fichiers .mkv / .avi. Les .mp4 sont envoyés tels quels.')) : null,
+    h('button', { class: 'btn primary block', onclick: () => { close(); sendEpisodes(t, rows.filter((r) => r.keep), existing, after, anyConvert && encOpts.on() ? encOpts.get() : null); } }, icon('upload'), 'Tout envoyer'),
   ]);
 }
 
-async function sendEpisodes(t, rows, existing, after) {
+async function sendEpisodes(t, rows, existing, after, convert = null) {
   if (!rows.length) return;
   const modal = progressModal('Envoi des épisodes');
   const failed = [];
@@ -367,6 +447,16 @@ async function sendEpisodes(t, rows, existing, after) {
       const clash = existing.find((e) => e.season === r.season && e.number === r.number);
       const epId = clash ? clash.id : uid();
       const v = Date.now().toString(36);
+      if (convert && NEEDS_CONVERT.test(f.name)) {
+        // envoi du fichier source puis conversion dans le cloud
+        const srcKey = `c/${t.id}/src/${epId}_${v}.${ext(f.name)}`;
+        await uploadSet([{ key: srcKey, body: f, type: 'application/octet-stream', label: f.name }], { set: (p, txt) => modal.set((i + p) / rows.length, prefix + (txt || '')) });
+        const base = { id: epId, title_id: t.id, season: r.season, number: r.number, name: r.name || clash?.name || null };
+        const { error } = clash ? await sb.from('episodes').update(base).eq('id', epId) : await sb.from('episodes').insert(base);
+        if (error) throw error;
+        await encode('create', { target_type: 'episode', target_id: epId, title_id: t.id, src_key: srcKey, src_size: f.size, options: convert, label: `${t.name} S${r.season}:É${r.number}` });
+        continue;
+      }
       const info = await videoInfo(f, { max: 640 });
       const row = {
         id: epId, title_id: t.id, season: r.season, number: r.number,
@@ -390,7 +480,7 @@ async function sendEpisodes(t, rows, existing, after) {
   await loadCatalog(true);
   modal.close();
   if (failed.length) errToast(`${rows.length - failed.length}/${rows.length} envoyés. Échecs : ${failed.join(', ')}`);
-  else toast(`${rows.length} épisode${rows.length > 1 ? 's' : ''} ajouté${rows.length > 1 ? 's' : ''}`);
+  else toast(convert ? 'Épisodes envoyés : la conversion suit dans « Conversions » du Studio' : `${rows.length} épisode${rows.length > 1 ? 's' : ''} ajouté${rows.length > 1 ? 's' : ''}`);
   after();
 }
 

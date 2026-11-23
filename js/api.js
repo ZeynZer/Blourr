@@ -29,6 +29,7 @@ async function call(fn, body) {
 }
 export const r2 = (action, payload = {}) => call('r2', { action, ...payload });
 export const signup = (payload) => call('signup', payload);
+export const encode = (action, payload = {}) => call('encode', { action, ...payload });
 
 // ---------- URLs signées (mises en cache) ----------
 const CACHE_KEY = 'blourr-urls';

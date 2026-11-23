@@ -345,7 +345,7 @@ function episodesBlock(t, closeDetail) {
         h('div', { class: 'ei' },
           h('div', { class: 't' }, `${e.number}. ${e.name || 'Épisode ' + e.number}`, h('span', {}, runtime(e.duration))),
           e.description ? h('p', {}, e.description) : null,
-          !e.video_key ? h('p', { style: { color: '#f59e0b' } }, 'Vidéo manquante') : null),
+          !e.video_key ? h('p', { style: { color: '#f59e0b' } }, 'Bientôt disponible') : null),
         e.video_key && dlSupported() ? downloadButton(t, e, { compact: true }) : null);
     }));
   }

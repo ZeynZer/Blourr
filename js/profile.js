@@ -1,5 +1,5 @@
 import { h, icon, toast, errToast, confirmBox, promptBox, bytes, avatar, sheet } from './ui.js';
-import { sb, state, r2, STORAGE_LIMIT, putUrls, putFile, removeKeys, lazyImg } from './api.js';
+import { sb, state, r2, STORAGE_LIMIT, putUrls, putFile, removeKeys, lazyImg, encode } from './api.js';
 import { resizeImage } from './media.js';
 import { cat, loadCatalog, titleById } from './catalog.js';
 import { openDetail } from './cine.js';
@@ -92,6 +92,7 @@ export function profileView() {
     privacyCard(p),
     usageCard(),
     state.isAdmin ? storageCard() : null,
+    state.isAdmin ? encoderCard() : null,
     state.isAdmin ? familyCard() : null,
     state.isAdmin ? donateSettingsCard() : null,
     state.isAdmin ? membersCard() : null,
@@ -262,4 +263,31 @@ function privacyCard(p) {
         h('div', { class: 'small muted' }, 'La famille voit quand tu es en ligne et ce que tu regardes.')),
       h('label', { class: 'switch' }, sw, h('span'))),
     h('p', { class: 'small muted', style: { margin: '12px 0 0' } }, 'L\'administrateur peut toujours voir l\'activité de chacun.'));
+}
+
+function encoderCard() {
+  const tok = h('input', { class: 'input', type: 'password', placeholder: 'github_pat_…', autocomplete: 'new-password', autocapitalize: 'off' });
+  const repo = h('input', { class: 'input', value: 'ZeynZer/blourr-encoder', autocapitalize: 'off', autocorrect: 'off' });
+  const status = h('div', { class: 'small', style: { marginBottom: '12px' } });
+  const setStatus = (ok) => status.replaceChildren(ok ? h('span', { style: { color: 'var(--ok)', fontWeight: 600 } }, '● Conversion prête') : h('span', { style: { color: '#f59e0b', fontWeight: 600 } }, '● Pas encore configurée'));
+  r2('get-settings').then((s) => { repo.value = s.ghRepo || repo.value; if (s.hasGh) tok.placeholder = '•••••••• (enregistré — laisse vide pour garder)'; setStatus(s.hasGh); }).catch(() => {});
+  const save = h('button', { class: 'btn primary block' }, icon('check'), 'Enregistrer et tester');
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      await r2('set-settings', { ghToken: tok.value.trim(), ghRepo: repo.value.trim() });
+      tok.value = '';
+      const t = await encode('test');
+      setStatus(t.ok);
+      if (t.ok) toast('GitHub répond : la conversion est prête'); else errToast(t.error || 'Le test a échoué.');
+    } catch (e) { errToast(e); } finally { save.disabled = false; }
+  };
+  return h('div', { class: 'card' },
+    h('h3', {}, icon('cloud'), 'Conversion dans le cloud'),
+    status,
+    h('p', { class: 'small muted', style: { marginTop: 0 } }, 'Permet d\'envoyer des .mkv depuis le Studio : ils sont convertis en MP4 par GitHub, puis supprimés.'),
+    h('div', { class: 'field' }, h('label', {}, 'Jeton GitHub (fine-grained)'), tok),
+    h('div', { class: 'field' }, h('label', {}, 'Dépôt de conversion'), repo),
+    h('p', { class: 'small muted', style: { margin: '-4px 0 14px' } }, 'Le jeton reste sur le serveur : personne d\'autre ne peut le voir.'),
+    save);
 }

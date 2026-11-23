@@ -71,13 +71,15 @@ Deno.serve(async (req) => {
           hasSecret: !!priv.r2_secret,
           bucket: priv.r2_bucket || "",
           familyCode: priv.family_code || "",
+          hasGh: !!priv.gh_token,
+          ghRepo: priv.gh_repo || "ZeynZer/blourr-encoder",
         });
       }
 
       case "set-settings": {
         if (!isAdmin) return json({ error: "Réservé à l'administrateur." }, 403);
         const map: Record<string, string> = {
-          accountId: "r2_account_id", accessKeyId: "r2_access_key_id", secretAccessKey: "r2_secret", bucket: "r2_bucket", familyCode: "family_code",
+          accountId: "r2_account_id", accessKeyId: "r2_access_key_id", secretAccessKey: "r2_secret", bucket: "r2_bucket", familyCode: "family_code", ghToken: "gh_token", ghRepo: "gh_repo",
         };
         const upserts = [];
         for (const [k, col] of Object.entries(map)) {
