@@ -3,7 +3,7 @@ import { sb, state, r2, STORAGE_LIMIT, putUrls, putFile, removeKeys, lazyImg } f
 import { resizeImage } from './media.js';
 import { cat, loadCatalog, titleById } from './catalog.js';
 import { openDetail } from './cine.js';
-import { donateSettingsCard } from './donate.js';
+import { donateSettingsCard, costLabel } from './donate.js';
 
 const CORS = `[
   {
@@ -114,16 +114,17 @@ function usageCard() {
   sb.rpc('storage_usage').then(({ data }) => {
     if (!data) return;
     const g = Number(data.gallery), c = Number(data.cine);
-    txt.textContent = `${bytes(g + c)} utilisés sur 10 Go`;
-    fillG.style.width = Math.min(100, g / STORAGE_LIMIT * 100) + '%';
-    fillC.style.width = Math.min(100, c / STORAGE_LIMIT * 100) + '%';
+    const tot = g + c || 1;
+    txt.textContent = costLabel(g + c);
+    fillG.style.width = (g / tot * 100) + '%';
+    fillC.style.width = (c / tot * 100) + '%';
     legend.replaceChildren(
       h('span', {}, h('i', { style: { background: 'var(--a1)' } }), `Galerie ${bytes(g)}`),
       h('span', {}, h('i', { style: { background: 'var(--cine-red)' } }), `Ciné ${bytes(c)}`),
-      h('span', {}, h('i', { style: { background: 'var(--surface3)' } }), `Libre ${bytes(Math.max(0, STORAGE_LIMIT - g - c))}`));
+      h('span', {}, `Total ${bytes(g + c)}`));
   });
-  return h('div', { class: 'card usage' }, h('h3', {}, icon('cloud'), 'Espace de stockage'), txt, bar, legend,
-    h('p', { class: 'small muted', style: { margin: '10px 0 0' } }, 'Gratuit jusqu\'à 10 Go. Au-delà, Cloudflare facture environ 0,015 $ par Go et par mois.'));
+  return h('div', { class: 'card usage' }, h('h3', {}, icon('cloud'), 'Coût du stockage'), txt, bar, legend,
+    h('p', { class: 'small muted', style: { margin: '10px 0 0' } }, 'Estimation : les 10 premiers Go sont offerts, puis environ 0,014 € par Go et par mois. La facture exacte est dans ton tableau de bord Cloudflare.'));
 }
 
 function storageCard() {

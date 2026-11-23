@@ -11,6 +11,11 @@ const ppUser = (v) => (v || '').trim().replace(/^https?:\/\//i, '').replace(/^(w
 const fmtIban = (v) => (v || '').replace(/\s+/g, '').toUpperCase().replace(/(.{4})/g, '$1 ').trim();
 // coût estimé Cloudflare R2 : 0,015 $/Go/mois au-delà de 10 Go (≈ 0,014 €)
 export const monthlyCost = (usedBytes) => Math.max(0, usedBytes / 1024 ** 3 - 10) * 0.014;
+export const costLabel = (usedBytes) => {
+  const c = monthlyCost(usedBytes);
+  if (c < 0.005) return '0 € / mois';
+  return '≈ ' + (c < 10 ? c.toFixed(2) : c.toFixed(1)).replace('.', ',') + ' € / mois';
+};
 
 async function copy(text, label) {
   try { await navigator.clipboard.writeText(text); toast(`${label} copié`); }

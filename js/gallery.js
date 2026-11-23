@@ -1,6 +1,7 @@
 import { h, icon, toast, errToast, sheet, confirmBox, promptBox, bytes, clock, monthLabel, dateFr, avatar, uid, ext, sleep } from './ui.js';
 import { sb, state, lazyImg, signedUrl, downloadUrl, removeKeys, putUrls, putFile, STORAGE_LIMIT } from './api.js';
 import { kindOf, resizeImage, videoInfo } from './media.js';
+import { costLabel } from './donate.js';
 import { go } from './router.js';
 
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -51,7 +52,8 @@ export function galleryView({ albumId = null, tab = 'all' } = {}) {
       const { data } = await sb.rpc('storage_usage');
       if (data) {
         const used = Number(data.gallery) + Number(data.cine);
-        usage.textContent = `${bytes(used)} / 10 Go`;
+        usage.textContent = costLabel(used);
+        usage.title = `${bytes(used)} stockés`;
       }
     } catch { /* rien */ }
   }
