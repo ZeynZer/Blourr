@@ -52,6 +52,19 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   const nextUp = h('div', { class: 'next-up hidden' });
   const loading = h('div', { class: 'pl-loading' }, h('div', { class: 'spinner' }));
   const help = h('div', { class: 'pl-help hidden' });
+  const t0 = performance.now(); const evlog = []; let tuCount = 0;
+  ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing', 'pause', 'waiting', 'stalled', 'suspend', 'seeking', 'seeked', 'emptied', 'abort', 'error', 'ended'].forEach((ev) =>
+    video.addEventListener(ev, () => { evlog.push(`${((performance.now() - t0) / 1000).toFixed(1)} ${ev}${ev === 'error' && video.error ? ' ' + video.error.code : ''}`); if (evlog.length > 40) evlog.shift(); }));
+  video.addEventListener('timeupdate', () => { tuCount++; });
+  async function openExternal() {
+    // Ouvre la vidéo dans le lecteur de Safari (secours quand le mode appli bloque)
+    try {
+      const u = await signedUrl(cur().video_key);
+      const at = Math.floor(video.currentTime || startAt || 0);
+      persist();
+      window.open(at > 5 ? `${u}#t=${at}` : u, '_blank');
+    } catch (e) { errToast(e); }
+  }
   function showHelp(stuckNow = true) {
     const st = `état ${video.readyState}/${video.networkState} · ${video.error ? 'erreur ' + video.error.code : 'pas d\'erreur'} · ${Math.round(video.currentTime)} s`;
     help.replaceChildren(
@@ -59,8 +72,15 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
       stuckNow ? h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' } },
         h('button', { class: 'btn sm light', onclick: (e) => { e.stopPropagation(); help.classList.add('hidden'); video.play().catch(() => {}); } }, icon('play'), 'Lancer'),
         h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); help.classList.add('hidden'); retries = 0; recover('manual'); } }, icon('refresh'), 'Réessayer'),
-        video.webkitEnterFullscreen ? h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); try { video.play().catch(() => {}); video.webkitEnterFullscreen(); } catch { /* rien */ } } }, icon('fullscreen'), 'Lecteur iPhone') : null) : null,
-      stuckNow ? h('small', {}, st) : null);
+        video.webkitEnterFullscreen ? h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); try { video.play().catch(() => {}); video.webkitEnterFullscreen(); } catch { /* rien */ } } }, icon('fullscreen'), 'Lecteur iPhone') : null,
+        h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openExternal(); } }, icon('share'), 'Ouvrir dans Safari')) : null,
+      stuckNow ? h('small', {}, st) : null,
+      stuckNow ? h('details', { style: { marginTop: '8px', textAlign: 'left' }, onclick: (e) => e.stopPropagation() },
+        h('summary', { style: { fontSize: '11px', color: '#888' } }, 'Détails techniques (capture pour Claude)'),
+        h('pre', { style: { fontSize: '10px', color: '#aaa', whiteSpace: 'pre-wrap', maxHeight: '30vh', overflow: 'auto', margin: '6px 0 0' } },
+          [`appli:${!!(navigator.standalone || matchMedia('(display-mode: standalone)').matches)} paused:${video.paused} muted:${video.muted} rs:${video.readyState} ns:${video.networkState} t:${video.currentTime.toFixed(2)} dur:${Math.round(video.duration || 0)} tu:${tuCount}`,
+            `taille:${video.videoWidth}x${video.videoHeight} pistes:${video.audioTracks ? video.audioTracks.length : '?'} buf:${video.buffered.length ? video.buffered.end(video.buffered.length - 1).toFixed(1) : 0}`,
+            `ua:${navigator.userAgent.replace(/.*OS ([\d_]+).*/, 'iOS $1')}`, ...evlog].join('\n'))) : null);
     help.classList.remove('hidden');
     if (!stuckNow) setTimeout(() => help.classList.add('hidden'), 3500);
   }
