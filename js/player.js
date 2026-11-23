@@ -17,7 +17,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   let countdown = null;
   let closed = false;
 
-  const video = h('video', { playsinline: true, preload: 'auto' });
+  const video = h('video', { playsinline: true, preload: 'metadata' });
   video.setAttribute('playsinline', '');
   video.setAttribute('webkit-playsinline', '');
 
@@ -77,6 +77,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
       stuckNow ? h('small', {}, st) : null,
       stuckNow ? h('details', { style: { marginTop: '8px', textAlign: 'left' }, onclick: (e) => e.stopPropagation() },
         h('summary', { style: { fontSize: '11px', color: '#888' } }, 'Détails techniques (capture pour Claude)'),
+        h('button', { class: 'btn sm', style: { margin: '6px 0' }, onclick: (e) => { e.stopPropagation(); const txt = e.target.closest('details').querySelector('pre').textContent; navigator.clipboard.writeText(txt).then(() => toast('Détails copiés : colle-les dans la conversation'), () => toast('Copie impossible', 'err')); } }, icon('copy'), 'Copier'),
         h('pre', { style: { fontSize: '10px', color: '#aaa', whiteSpace: 'pre-wrap', maxHeight: '30vh', overflow: 'auto', margin: '6px 0 0' } },
           [`appli:${!!(navigator.standalone || matchMedia('(display-mode: standalone)').matches)} paused:${video.paused} muted:${video.muted} rs:${video.readyState} ns:${video.networkState} t:${video.currentTime.toFixed(2)} dur:${Math.round(video.duration || 0)} tu:${tuCount}`,
             `taille:${video.videoWidth}x${video.videoHeight} pistes:${video.audioTracks ? video.audioTracks.length : '?'} buf:${video.buffered.length ? video.buffered.end(video.buffered.length - 1).toFixed(1) : 0}`,
@@ -160,7 +161,6 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   let startAt = 0;
   async function load(e, from) {
     // « amorce » la vidéo pendant le toucher (iPhone en mode appli exige un geste pour lancer la lecture)
-    try { if (!video.src) { video.muted = true; video.play().catch(() => {}); video.muted = false; } } catch { /* rien */ }
     ep = e;
     clearCountdown();
     flushSession();
@@ -465,8 +465,14 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     clearInterval(tick);
     clearInterval(watchdog);
     clearCountdown();
-    video.pause();
-    video.removeAttribute('src'); video.load();
+    // libère complètement le lecteur vidéo de l'iPhone (sinon il reste occupé et bloque les vidéos suivantes)
+    releaseVideo(video);
+    try {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = null;
+        ['seekbackward', 'seekforward', 'nexttrack', 'play', 'pause'].forEach((a) => { try { navigator.mediaSession.setActionHandler(a, null); } catch { /* rien */ } });
+      }
+    } catch { /* rien */ }
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('visibilitychange', onHide);
@@ -483,4 +489,16 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   load(ep, start);
   showUI();
   setTimeout(() => { if (!closed && video.currentTime < 0.5 && !video.paused) showHelp(true); }, 12000);
+}
+
+// Arrête et décharge une vidéo pour libérer le décodeur (indispensable sur iPhone)
+export function releaseVideo(v) {
+  if (!v) return;
+  try {
+    v.pause();
+    v.querySelectorAll('track, source').forEach((x) => x.remove());
+    v.removeAttribute('src');
+    v.srcObject = null;
+    v.load();
+  } catch { /* rien */ }
 }

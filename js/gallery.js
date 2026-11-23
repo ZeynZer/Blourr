@@ -3,6 +3,7 @@ import { sb, state, lazyImg, signedUrl, downloadUrl, removeKeys, putUrls, putFil
 import { kindOf, resizeImage, videoInfo } from './media.js';
 import { costLabel } from './donate.js';
 import { go } from './router.js';
+import { releaseVideo } from './player.js';
 
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const bus = new EventTarget();
@@ -477,7 +478,7 @@ export function openViewer(list, index, { onChange } = {}) {
   document.body.style.overflow = 'hidden';
 
   function close() {
-    stage.querySelectorAll('video').forEach((x) => x.pause());
+    stage.querySelectorAll('video').forEach(releaseVideo);
     v.remove(); document.body.style.overflow = '';
     document.removeEventListener('keydown', onKey);
   }
@@ -492,7 +493,7 @@ export function openViewer(list, index, { onChange } = {}) {
 
   function show() {
     const m = list[i];
-    stage.querySelectorAll('video').forEach((x) => x.pause());
+    stage.querySelectorAll('video').forEach(releaseVideo);
     stage.replaceChildren();
     name.textContent = m.name || '';
     counter.textContent = `${i + 1}/${list.length}`;
