@@ -1,10 +1,10 @@
 // Service worker Blourr : garde l'appli disponible hors connexion (pour regarder les téléchargements).
 // Il ne touche qu'aux fichiers de l'appli : les vidéos et l'API passent directement par le réseau.
-const VERSION = 'blourr-v18';
+const VERSION = 'blourr-v19';
 const SHELL = [
-  './', './index.html', './manifest.webmanifest', './css/app.css?v=18', './js/main.js?v=18',
+  './', './index.html', './manifest.webmanifest', './css/app.css?v=19', './js/main.js?v=19',
   './js/api.js', './js/ui.js', './js/router.js', './js/auth.js', './js/gallery.js', './js/media.js', './js/catalog.js',
-  './js/cine.js', './js/player.js', './js/studio.js', './js/profile.js', './js/intro.js', './js/family.js', './js/donate.js',
+  './js/cine.js', './js/player.js', './js/studio.js', './js/profile.js', './js/intro.js', './js/family.js', './js/donate.js', './js/fillin.js',
   './js/downloads.js', './js/dlworker.js', './js/vendor/supabase.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon.png',
 ];

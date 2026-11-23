@@ -628,3 +628,4 @@ pre.code { display: block; padding: 10px; white-space: pre-wrap; margin: 6px 0; 
 .dl-pill .bar { height: 4px; }
 .dl-pill .bar i { background: var(--cine-red); }
 .player ~ .dl-pill, body:has(.player) .dl-pill { display: none; }
+.fill-btn { border: 1px dashed #4a4a58; background: rgba(229,9,20,.06); }

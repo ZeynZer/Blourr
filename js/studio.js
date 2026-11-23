@@ -3,6 +3,7 @@ import { sb, state, lazyImg, bgInto, putUrls, putFile, removeKeys, encode } from
 import { cat, loadCatalog, titleById, episodesOf, sagaTitles } from './catalog.js';
 import { resizeImage, videoInfo, toVtt, guessName, parseEpisode, episodeName } from './media.js';
 import { go } from './router.js';
+import { fillSheet } from './fillin.js';
 
 const GENRES = ['Action', 'Aventure', 'Animation', 'Comédie', 'Drame', 'Famille', 'Fantastique', 'Science-fiction', 'Horreur', 'Thriller', 'Policier', 'Documentaire', 'Romance', 'Anime', 'Historique', 'Guerre', 'Western', 'Musique', 'Sport', 'Religieux'];
 const RATINGS = ['', 'Tous publics', '7+', '10+', '12+', '16+', '18+'];
@@ -128,7 +129,7 @@ function titleEditor(id, newKind) {
     const existing = id ? titleById(id) : null;
     if (id && !existing) { body.replaceChildren(h('p', {}, 'Titre introuvable.')); return; }
     const t = existing ? { ...existing } : { id: uid(), kind: newKind === 'series' ? 'series' : 'movie', name: '', genres: [], featured: false };
-    const pending = { poster: null, backdrop: null, video: null, sub: null, autoBackdrop: null };
+    const pending = { poster: null, backdrop: null, video: null, sub: null, autoBackdrop: null, newSaga: null, eps: null };
 
     const name = h('input', { class: 'input', value: t.name || '', placeholder: 'Titre' });
     const year = h('input', { class: 'input', value: t.year || '', placeholder: '2024', inputmode: 'numeric' });
@@ -207,6 +208,44 @@ function titleEditor(id, newKind) {
         h('div', { class: 'field grow', style: { margin: 0 } }, h('label', {}, 'Fin de l\'intro'), introE)),
       h('div', { class: 'small muted', style: { marginTop: '6px' } }, 'Facultatif : affiche le bouton « Passer l\'intro ».')) : null;
 
+    const fillHint = h('div', { class: 'small muted', style: { marginTop: '6px' } });
+    const fillBtn = h('button', { class: 'btn block fill-btn', onclick: () => fillSheet(
+      () => ({ kind: t.kind, name: name.value.trim(), year: year.value.trim(), genres: GENRES, ratings: RATINGS }),
+      (r) => {
+        let n = 0;
+        if (r.name) { name.value = r.name; n++; }
+        if (r.year) { year.value = r.year; n++; }
+        if (r.rating && RATINGS.includes(r.rating)) { rating.value = r.rating; n++; }
+        if (r.description) { desc.value = r.description; n++; }
+        if (r.genres?.length) { genres.clear(); r.genres.forEach((g) => genres.add(g)); drawGenres(); n++; }
+        if (r.saga) {
+          const found = cat.sagas.find((x) => x.name.toLowerCase().trim() === r.saga.toLowerCase());
+          if (found) { sagaSel.value = found.id; pending.newSaga = null; }
+          else {
+            pending.newSaga = { id: uid(), name: r.saga };
+            sagaSel.querySelector('option[data-new]')?.remove();
+            sagaSel.insertBefore(h('option', { value: pending.newSaga.id, 'data-new': '1' }, r.saga + ' (nouvelle)'), sagaSel.lastChild);
+            sagaSel.value = pending.newSaga.id;
+          }
+          if (r.order) sagaOrder.value = r.order;
+          n++;
+        }
+        const msgs = [];
+        if (r.episodes?.length) {
+          if (t.kind !== 'series') { /* ignoré pour un film */ }
+          else if (!existing) msgs.push(`${r.episodes.length} épisodes reconnus : crée d'abord la série et ajoute les vidéos, puis refais « Remplir » pour leurs titres.`);
+          else {
+            const eps = episodesOf(t.id);
+            const match = r.episodes.filter((x) => eps.some((e) => e.season === x.season && e.number === x.number));
+            pending.eps = match;
+            msgs.push(`${match.length}/${eps.length} épisodes recevront leur titre et résumé à l'enregistrement.`);
+            if (match.length) n++;
+          }
+        }
+        fillHint.textContent = msgs.join(' ');
+        return n;
+      }) }, icon('sparkle'), 'Remplir avec un texte (IA)');
+
     const saveBtn = h('button', { class: 'btn primary block', style: { marginTop: '8px' } }, icon('check'), existing ? 'Enregistrer' : 'Créer');
     saveBtn.onclick = async () => {
       if (!name.value.trim()) return errToast('Donne un titre.');
@@ -221,6 +260,11 @@ function titleEditor(id, newKind) {
           saga_order: parseInt(sagaOrder.value, 10) || null, featured: featured.checked,
         };
         if (t.kind === 'movie') { row.intro_start = parseClock(introS.value); row.intro_end = parseClock(introE.value); }
+        if (pending.newSaga && row.saga_id === pending.newSaga.id) {
+          const { error: se } = await sb.from('sagas').insert({ id: pending.newSaga.id, name: pending.newSaga.name });
+          if (se) throw se;
+          pending.newSaga = null;
+        }
         const files = []; const old = [];
         const v = Date.now().toString(36);
         if (pending.poster) { row.poster_key = `c/${t.id}/poster_${v}.jpg`; files.push({ key: row.poster_key, body: pending.poster, type: 'image/jpeg', label: 'Affiche' }); old.push(t.poster_key); }
@@ -242,6 +286,16 @@ function titleEditor(id, newKind) {
         modal.set(1, 'Enregistrement…');
         const { error } = await sb.from('titles').upsert(row);
         if (error) throw error;
+        if (pending.eps?.length) {
+          modal.set(1, 'Titres des épisodes…');
+          const eps = episodesOf(t.id);
+          for (const x of pending.eps) {
+            const e = eps.find((y) => y.season === x.season && y.number === x.number);
+            const upd = {}; if (x.name) upd.name = x.name; if (x.description) upd.description = x.description;
+            if (e && Object.keys(upd).length) { const { error: ee } = await sb.from('episodes').update(upd).eq('id', e.id); if (ee) throw ee; }
+          }
+          pending.eps = null;
+        }
         if (srcJob) {
           modal.set(1, 'Lancement de la conversion…');
           await encode('create', { target_type: 'movie', target_id: t.id, src_key: srcJob.key, src_size: srcJob.size, options: encOpts.get(), label: row.name });
@@ -270,7 +324,8 @@ function titleEditor(id, newKind) {
       h('div', { class: 'row', style: { alignItems: 'stretch', marginBottom: '14px' } },
         h('div', { style: { width: '32%' } }, posterPick),
         h('div', { class: 'grow' }, backPick)),
-      h('div', { class: 'field' }, h('label', {}, 'Titre'), name),
+      fillBtn, fillHint,
+      h('div', { class: 'field', style: { marginTop: '14px' } }, h('label', {}, 'Titre'), name),
       h('div', { class: 'row' },
         h('div', { class: 'field grow' }, h('label', {}, 'Année'), year),
         h('div', { class: 'field grow' }, h('label', {}, 'Âge'), rating)),
