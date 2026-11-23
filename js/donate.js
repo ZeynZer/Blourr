@@ -27,12 +27,10 @@ export function donateCard() {
       if (state.isAdmin) box.replaceChildren(h('div', { class: 'banner', style: { cursor: 'pointer' }, onclick: () => { location.hash = '#/profil'; } }, icon('heart'), h('div', {}, 'Ajoute ton PayPal ou ton IBAN dans ', h('b', {}, 'Profil → Dons'), ' pour que la famille puisse participer aux frais.')));
       return;
     }
-    const used = u ? Number(u.gallery) + Number(u.cine) : 0;
-    const cost = monthlyCost(used);
     box.replaceChildren(h('div', { class: 'card donate', style: { marginTop: '4px' } },
       h('h3', {}, icon('heart'), 'Soutenir Blourr'),
       h('p', { class: 'small', style: { margin: '0 0 6px', color: 'var(--text)' } }, d.donate_message || 'Blourr est gratuit pour toute la famille. Si tu veux, tu peux participer aux frais de stockage des photos et des films ❤️'),
-      h('p', { class: 'small muted', style: { margin: '0 0 14px' } }, `Espace utilisé : ${bytes(used)} · coût estimé : ${cost < 0.01 ? 'gratuit pour l\'instant' : cost.toFixed(2).replace('.', ',') + ' € / mois'}`),
+      h('div', { style: { height: '8px' } }),
       pp ? h('div', { class: 'row', style: { marginBottom: '10px', flexWrap: 'wrap' } },
         [2, 5, 10].map((n) => h('a', { class: 'btn sm grow', href: `https://paypal.me/${encodeURIComponent(pp)}/${n}EUR`, target: '_blank', rel: 'noopener' }, `${n} €`)),
         h('a', { class: 'btn sm primary grow', href: `https://paypal.me/${encodeURIComponent(pp)}`, target: '_blank', rel: 'noopener' }, 'PayPal')) : null,

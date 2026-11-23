@@ -49,6 +49,18 @@ function route() {
 }
 
 let booting = null;
+// Présence « en ligne » : petit signal toutes les 60 s quand l'appli est ouverte
+let presenceT = null;
+function ping() {
+  if (!state.profile || document.visibilityState !== 'visible') return;
+  sb.from('presence').upsert({ user_id: state.profile.id, last_active: new Date().toISOString() }).then(() => {}, () => {});
+}
+function startPresence() {
+  if (presenceT) return;
+  ping();
+  presenceT = setInterval(ping, 60000);
+  document.addEventListener('visibilitychange', ping);
+}
 async function enter(session) {
   state.session = session;
   const { data: profile, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
@@ -61,6 +73,7 @@ async function enter(session) {
   state.isAdmin = profile.role === 'admin';
   try { const s = await r2('status'); state.configured = s.configured; } catch { state.configured = null; }
   if (!nav) buildNav();
+  startPresence();
   // À l'ouverture de l'appli : direction le Ciné, avec le générique
   if (!sessionStorage.getItem('blourr-intro')) {
     sessionStorage.setItem('blourr-intro', '1');

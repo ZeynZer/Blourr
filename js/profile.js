@@ -89,6 +89,7 @@ export function profileView() {
           toast('Mot de passe changé');
         } }, icon('lock'), 'Mot de passe'))),
     favsCard(),
+    privacyCard(p),
     usageCard(),
     state.isAdmin ? storageCard() : null,
     state.isAdmin ? familyCard() : null,
@@ -243,4 +244,21 @@ function favsCard() {
     }));
   }).catch(() => {});
   return h('div', { class: 'card' }, h('h3', {}, icon('heart'), 'Mes préférés'), grid);
+}
+
+function privacyCard(p) {
+  const sw = h('input', { type: 'checkbox', checked: p.share_activity !== false });
+  sw.addEventListener('change', async () => {
+    const { error } = await sb.from('profiles').update({ share_activity: sw.checked }).eq('id', p.id);
+    if (error) { sw.checked = !sw.checked; return errToast(error); }
+    p.share_activity = sw.checked;
+    toast(sw.checked ? 'La famille voit quand tu es en ligne' : 'Ton activité est masquée');
+  });
+  return h('div', { class: 'card' },
+    h('h3', {}, icon('eye'), 'Confidentialité'),
+    h('div', { class: 'row', style: { justifyContent: 'space-between' } },
+      h('div', { class: 'grow' }, h('div', { style: { fontWeight: 600 } }, 'Montrer mon activité'),
+        h('div', { class: 'small muted' }, 'La famille voit quand tu es en ligne et ce que tu regardes.')),
+      h('label', { class: 'switch' }, sw, h('span'))),
+    h('p', { class: 'small muted', style: { margin: '12px 0 0' } }, 'L\'administrateur peut toujours voir l\'activité de chacun.'));
 }
