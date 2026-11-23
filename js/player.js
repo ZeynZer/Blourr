@@ -34,10 +34,9 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   const langBtn = h('button', { class: 'hidden', onclick: () => languageSheet() }, icon('volume'), h('span', {}, 'Langue'));
   const epsBtn = h('button', { class: t.kind === 'series' ? '' : 'hidden', onclick: () => episodesSheet() }, icon('episodes'), 'Épisodes');
   const nextBtn = h('button', { class: 'hidden', onclick: () => goNext() }, icon('nextep'), 'Épisode suivant');
-  // Sur iPhone, le plein écran natif masquerait nos boutons : on propose un zoom (remplir l'écran) à la place
-  const fsBtn = isIOS
-    ? h('button', { title: 'Remplir l\'écran', onclick: () => { root.classList.toggle('zoomed'); fsBtn.classList.toggle('on', root.classList.contains('zoomed')); } }, icon('zoom'))
-    : h('button', { title: 'Plein écran', onclick: () => fullscreen() }, icon('fullscreen'));
+  // Plein écran : sur iPhone, on ouvre le lecteur d'Apple (le plus fluide) ; ailleurs, le plein écran du navigateur
+  const fsBtn = h('button', { title: 'Plein écran', onclick: () => fullscreen() }, icon('fullscreen'));
+  const zoomBtn = isIOS ? h('button', { title: 'Remplir l\'écran', onclick: () => { root.classList.toggle('zoomed'); zoomBtn.classList.toggle('on', root.classList.contains('zoomed')); } }, icon('zoom')) : null;
   let savedVol = 1;
   try { savedVol = Math.min(1, Math.max(0, parseFloat(localStorage.getItem('blourr-vol') ?? '1'))); } catch { /* rien */ }
   const muteBtn = h('button', { title: 'Son', onclick: () => { video.muted = !video.muted; if (!video.muted && video.volume === 0) video.volume = 0.5; volUI(); } }, icon('volume'));
@@ -51,43 +50,6 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   let introSeenAt = 0;
   const nextUp = h('div', { class: 'next-up hidden' });
   const loading = h('div', { class: 'pl-loading' }, h('div', { class: 'spinner' }));
-  const help = h('div', { class: 'pl-help hidden' });
-  const t0 = performance.now(); const evlog = []; let tuCount = 0;
-  ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing', 'pause', 'waiting', 'stalled', 'suspend', 'seeking', 'seeked', 'emptied', 'abort', 'error', 'ended'].forEach((ev) =>
-    video.addEventListener(ev, () => { evlog.push(`${((performance.now() - t0) / 1000).toFixed(1)} ${ev}${ev === 'error' && video.error ? ' ' + video.error.code : ''}`); if (evlog.length > 40) evlog.shift(); }));
-  video.addEventListener('timeupdate', () => { tuCount++; });
-  async function openExternal() {
-    // Ouvre la vidéo dans le lecteur de Safari (secours quand le mode appli bloque)
-    try {
-      const u = await signedUrl(cur().video_key);
-      const at = Math.floor(video.currentTime || startAt || 0);
-      persist();
-      window.open(at > 5 ? `${u}#t=${at}` : u, '_blank');
-    } catch (e) { errToast(e); }
-  }
-  function showHelp(stuckNow = true) {
-    const st = `état ${video.readyState}/${video.networkState} · ${video.error ? 'erreur ' + video.error.code : 'pas d\'erreur'} · ${Math.round(video.currentTime)} s`;
-    help.replaceChildren(
-      h('b', {}, stuckNow ? 'La vidéo ne démarre pas ?' : 'Touche ▶ pour lancer la lecture'),
-      stuckNow ? h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' } },
-        h('button', { class: 'btn sm light', onclick: (e) => { e.stopPropagation(); help.classList.add('hidden'); video.play().catch(() => {}); } }, icon('play'), 'Lancer'),
-        h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); help.classList.add('hidden'); retries = 0; recover('manual'); } }, icon('refresh'), 'Réessayer'),
-        video.webkitEnterFullscreen ? h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); try { video.play().catch(() => {}); video.webkitEnterFullscreen(); } catch { /* rien */ } } }, icon('fullscreen'), 'Lecteur iPhone') : null,
-        h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openExternal(); } }, icon('share'), 'Ouvrir dans Safari')) : null,
-      stuckNow ? h('small', {}, st) : null,
-      stuckNow ? h('details', { style: { marginTop: '8px', textAlign: 'left' }, onclick: (e) => e.stopPropagation() },
-        h('summary', { style: { fontSize: '11px', color: '#888' } }, 'Détails techniques (capture pour Claude)'),
-        h('button', { class: 'btn sm', style: { margin: '6px 0' }, onclick: (e) => { e.stopPropagation(); const txt = e.target.closest('details').querySelector('pre').textContent; navigator.clipboard.writeText(txt).then(() => toast('Détails copiés : colle-les dans la conversation'), () => toast('Copie impossible', 'err')); } }, icon('copy'), 'Copier'),
-        h('pre', { style: { fontSize: '10px', color: '#aaa', whiteSpace: 'pre-wrap', maxHeight: '30vh', overflow: 'auto', margin: '6px 0 0' } },
-          [`appli:${!!(navigator.standalone || matchMedia('(display-mode: standalone)').matches)} paused:${video.paused} muted:${video.muted} rs:${video.readyState} ns:${video.networkState} t:${video.currentTime.toFixed(2)} dur:${Math.round(video.duration || 0)} tu:${tuCount}`,
-            `taille:${video.videoWidth}x${video.videoHeight} pistes:${video.audioTracks ? video.audioTracks.length : '?'} buf:${video.buffered.length ? video.buffered.end(video.buffered.length - 1).toFixed(1) : 0}`,
-            `ua:${navigator.userAgent.replace(/.*OS ([\d_]+).*/, 'iOS $1')}`, ...evlog].join('\n'))) : null);
-    help.classList.remove('hidden');
-    if (!stuckNow) setTimeout(() => help.classList.add('hidden'), 3500);
-  }
-  const flashL = h('div', { class: 'seek-flash l' }, '−10 s');
-  const flashR = h('div', { class: 'seek-flash r' }, '+10 s');
-
   const ui = h('div', { class: 'pl-ui' },
     h('div', { class: 'pl-top' }, h('button', { class: 'icon-btn plain', onclick: () => exit() }, icon('back')), ttl, h('div', { style: { width: '40px' } })),
     h('div', { class: 'pl-mid' },
@@ -96,9 +58,9 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
       h('button', { class: 'sk', onclick: (e) => { e.stopPropagation(); seekBy(10); } }, icon('fwd10'))),
     h('div', { class: 'pl-bot' },
       h('div', { class: 'pl-seek' }, elapsed, track, remain),
-      h('div', { class: 'pl-btns' }, volBox, speedBtn, epsBtn, langBtn, subBtn, h('div', { class: 'sp' }), nextBtn, fsBtn)));
+      h('div', { class: 'pl-btns' }, volBox, speedBtn, epsBtn, langBtn, subBtn, h('div', { class: 'sp' }), nextBtn, zoomBtn, fsBtn)));
 
-  const root = h('div', { class: 'player' }, video, flashL, flashR, loading, ui, skipIntro, nextUp, help);
+  const root = h('div', { class: 'player' }, video, flashL, flashR, loading, ui, skipIntro, nextUp);
   document.body.append(root);
   document.body.style.overflow = 'hidden';
   if (!isIOS) video.volume = savedVol;
@@ -153,7 +115,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
       stuck = 0;
       if (retries === 0) recover('stall');
       else if (retries === 1 && !mutedTrick) tryMuted();
-      else showHelp(true);
+      else if (retries === 2) { retries++; toast('La vidéo ne démarre pas : ferme complètement l\'appli puis rouvre-la.', 'err'); }
     }
   }, 2000);
 
@@ -194,7 +156,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
         setSubs(subsOn);
         setupLanguages();
       }, { once: true });
-      video.play().catch(() => { loading.classList.add('hidden'); showUI(true); showHelp(false); });
+      video.play().catch(() => { loading.classList.add('hidden'); showUI(true); });
       mediaSession();
     } catch (err) { errToast(err); loading.classList.add('hidden'); }
   }
@@ -306,7 +268,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
 
   // ---------- Événements vidéo ----------
   video.addEventListener('waiting', () => loading.classList.remove('hidden'));
-  video.addEventListener('playing', () => { loading.classList.add('hidden'); help.classList.add('hidden'); showUI(); });
+  video.addEventListener('playing', () => { loading.classList.add('hidden'); showUI(); });
   video.addEventListener('canplay', () => loading.classList.add('hidden'));
   video.addEventListener('play', () => { ppBtn.replaceChildren(icon('pause')); showUI(); });
   video.addEventListener('pause', () => { ppBtn.replaceChildren(icon('play')); showUI(true); persist(); });
@@ -420,15 +382,19 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   }
 
   function fullscreen() {
-    const el = root;
+    if (isIOS && video.webkitEnterFullscreen) {
+      try { if (video.paused) video.play().catch(() => {}); video.webkitEnterFullscreen(); } catch { /* rien */ }
+      return;
+    }
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       (document.exitFullscreen || document.webkitExitFullscreen).call(document);
       return;
     }
-    if (el.requestFullscreen) el.requestFullscreen().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => video.webkitEnterFullscreen && video.webkitEnterFullscreen());
+    const el = root;
+    if (el.requestFullscreen) el.requestFullscreen().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
   }
+
 
   function mediaSession() {
     if (!('mediaSession' in navigator)) return;
@@ -488,7 +454,6 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
 
   load(ep, start);
   showUI();
-  setTimeout(() => { if (!closed && video.currentTime < 0.5 && !video.paused) showHelp(true); }, 12000);
 }
 
 // Arrête et décharge une vidéo pour libérer le décodeur (indispensable sur iPhone)
