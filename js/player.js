@@ -1,4 +1,4 @@
-import { h, icon, clock, sheet, errToast, runtime } from './ui.js';
+import { h, icon, clock, sheet, errToast, toast, runtime } from './ui.js';
 import { sb, signedUrl, freshUrl, lazyImg } from './api.js';
 import { releaseAudio } from './intro.js';
 import { uid } from './ui.js';
@@ -86,6 +86,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
 
   const cur = () => (ep || t);
   releaseAudio();
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* rien */ }
 
   // ---------- Anti-blocage : si l'image ne progresse plus, on recharge la vidéo au même endroit ----------
   let lastT = -1; let stuck = 0; let recovering = false; let retries = 0;
@@ -103,12 +104,36 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     } catch (e) { errToast(e); }
     setTimeout(() => { recovering = false; }, 4000);
   }
+  // Palier 2 : démarrer sans le son (l'iPhone en mode appli bloque parfois le départ à cause du son), puis le remettre
+  let mutedTrick = false;
+  function tryMuted() {
+    mutedTrick = true; retries++;
+    video.muted = true;
+    video.play().catch(() => {});
+    const t0 = video.currentTime;
+    const chk = setInterval(() => {
+      if (closed) return clearInterval(chk);
+      if (video.currentTime > t0 + 0.5) {
+        clearInterval(chk);
+        video.muted = false;
+        setTimeout(() => {
+          if (video.paused || video.muted) { video.muted = true; video.play().catch(() => {}); toast('Touche 🔊 en bas à gauche pour remettre le son'); showUI(true); }
+        }, 600);
+      }
+    }, 300);
+    setTimeout(() => clearInterval(chk), 10000);
+  }
   const watchdog = setInterval(() => {
     if (video.paused || video.seeking || video.ended || !video.src || recovering) { stuck = 0; lastT = video.currentTime; return; }
     if (Math.abs(video.currentTime - lastT) < 0.01) stuck++; else { stuck = 0; retries = 0; }
     lastT = video.currentTime;
     // données disponibles mais image figée : ~6 s ; en attente du réseau : ~16 s
-    if (stuck >= (video.readyState >= 3 ? 3 : 8)) { stuck = 0; if (retries >= 2) showHelp(true); else recover('stall'); }
+    if (stuck >= (video.readyState >= 3 ? 3 : 8)) {
+      stuck = 0;
+      if (retries === 0) recover('stall');
+      else if (retries === 1 && !mutedTrick) tryMuted();
+      else showHelp(true);
+    }
   }, 2000);
 
   // ---------- Chargement d'une vidéo ----------
