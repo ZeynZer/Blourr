@@ -619,3 +619,12 @@ pre.code { display: block; padding: 10px; white-space: pre-wrap; margin: 6px 0; 
 .enc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 .enc-grid .field { margin-bottom: 8px; }
 .enc-grid .select { height: 42px; font-size: 14px; }
+
+.dl-ring { position: relative; display: inline-grid !important; place-items: center; }
+.dl-ring b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 8px; font-weight: 800; color: #fff; }
+.d-actions .dl-ring b { font-size: 9px; }
+.dl-pill { position: fixed; left: 12px; right: 12px; bottom: calc(var(--nav-h) + var(--safe-b) + 10px); z-index: 90; max-width: 460px; margin: 0 auto; background: rgba(26,26,34,.96); backdrop-filter: blur(16px); border: 1px solid #333; border-radius: 14px; padding: 10px 14px; box-shadow: 0 12px 30px rgba(0,0,0,.5); cursor: pointer; animation: pop .25s var(--ease); }
+.dl-pill-t { font-size: 13px; font-weight: 600; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-pill .bar { height: 4px; }
+.dl-pill .bar i { background: var(--cine-red); }
+.player ~ .dl-pill, body:has(.player) .dl-pill { display: none; }

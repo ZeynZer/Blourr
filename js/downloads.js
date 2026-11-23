@@ -6,7 +6,27 @@ const KEY = 'blourr-downloads';
 const PROG = 'blourr-offline-progress';
 const bus = new EventTarget();
 export const onDownloads = (fn) => { bus.addEventListener('change', fn); return () => bus.removeEventListener('change', fn); };
-const emit = () => bus.dispatchEvent(new Event('change'));
+const emit = () => { bus.dispatchEvent(new Event('change')); updatePill(); };
+let pill = null;
+function updatePill() {
+  const active = Object.values(db).filter((d) => d.status === 'downloading' || d.status === 'queued');
+  if (!active.length) { pill?.remove(); pill = null; return; }
+  const cur = active.find((d) => d.status === 'downloading') || active[0];
+  const pct = cur.size ? Math.floor((cur.progress / cur.size) * 100) : 0;
+  const name = cur.episode ? `${cur.title.name} · É${cur.episode.number}` : cur.title.name;
+  if (!pill) {
+    pill = document.createElement('div');
+    pill.className = 'dl-pill';
+    pill.addEventListener('click', () => { location.hash = '#/telechargements'; });
+    document.body.append(pill);
+  }
+  pill.innerHTML = '';
+  const label = document.createElement('div'); label.className = 'dl-pill-t';
+  label.textContent = `⬇ ${name} — ${cur.status === 'queued' ? 'en attente' : pct + ' %'}${active.length > 1 ? ` (+${active.length - 1})` : ''}`;
+  const bar = document.createElement('div'); bar.className = 'bar';
+  const fill = document.createElement('i'); fill.style.width = pct + '%'; bar.append(fill);
+  pill.append(label, bar);
+}
 
 export const supported = () => !!(navigator.storage && navigator.storage.getDirectory && window.Worker);
 
@@ -152,7 +172,9 @@ export function downloadButton(title, episode = null, { compact = false } = {}) 
     else if (d?.status === 'downloading') { pct = d.size ? Math.floor((d.progress / d.size) * 100) : 0; label = `${pct} %`; ic = 'x'; }
     else if (d?.status === 'queued') { label = 'En attente'; ic = 'x'; }
     else if (d?.status === 'error' || d?.status === 'paused') { label = 'Reprendre'; ic = 'refresh'; }
-    btn.replaceChildren(pct != null ? h('span', { class: 'dl-ring', style: { '--p': pct } }) : icon(ic), compact ? null : label);
+    let ring = null;
+    if (pct != null) { ring = h('span', { class: 'dl-ring' }, h('b', {}, String(pct))); ring.style.setProperty('--p', pct); }
+    btn.replaceChildren(ring || icon(ic), compact ? null : label);
     btn.classList.toggle('on', d?.status === 'done');
   };
   btn.onclick = async (e) => {
