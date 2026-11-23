@@ -513,17 +513,26 @@ pre.code { display: block; padding: 10px; white-space: pre-wrap; margin: 6px 0; 
 }
 
 /* ---------- Générique d'ouverture ---------- */
-.intro { position: fixed; inset: 0; z-index: 1000; background: #000; display: grid; place-items: center; overflow: hidden; transition: opacity .45s; cursor: pointer; }
+.intro { position: fixed; inset: 0; z-index: 1000; background: #000; display: grid; place-items: center; overflow: hidden; transition: opacity .5s; cursor: pointer; }
 .intro.out { opacity: 0; }
-.intro-b { position: relative; font-family: "Bebas Neue", "Inter", sans-serif; font-size: min(46vmin, 360px); line-height: 1; animation: bDive 1.5s cubic-bezier(.7,0,.84,0) 1.3s forwards; transform-origin: 46% 50%; }
-.intro-letter { position: relative; display: block; background: linear-gradient(160deg, #ff6b8b 0%, #ff2e5b 45%, #b3123f 100%); -webkit-background-clip: text; background-clip: text; color: transparent; animation: bIn 1.1s cubic-bezier(.2,.8,.2,1) both; filter: drop-shadow(0 6px 30px rgba(255,46,91,.45)); z-index: 2; }
-.intro-glow { position: absolute; inset: 0; color: #ff2e5b; filter: blur(28px); opacity: 0; animation: bGlow 1.6s ease-out .3s forwards; z-index: 1; }
-.intro-rays { position: absolute; left: 18%; right: 18%; top: 8%; bottom: 8%; z-index: 3; pointer-events: none; }
-.intro-rays i { position: absolute; top: 0; bottom: 0; width: 3%; transform: scaleY(0); opacity: 0; transform-origin: 50% 50%; animation: ray 1.4s ease-in forwards; mix-blend-mode: screen; filter: blur(.5px); }
-@keyframes bIn { 0% { opacity: 0; transform: scale(.55); letter-spacing: .3em; filter: blur(12px) drop-shadow(0 0 0 transparent); } 60% { opacity: 1; filter: blur(0) drop-shadow(0 6px 30px rgba(255,46,91,.45)); } 100% { opacity: 1; transform: scale(1); letter-spacing: 0; } }
-@keyframes bGlow { 0% { opacity: 0; } 50% { opacity: .9; } 100% { opacity: .5; } }
-@keyframes bDive { 0% { transform: scale(1); opacity: 1; } 70% { opacity: 1; } 100% { transform: scale(22); opacity: 0; } }
-@keyframes ray { 0% { transform: scaleY(0) scaleX(1); opacity: 0; } 25% { transform: scaleY(1) scaleX(1); opacity: .9; } 100% { transform: scaleY(1.6) scaleX(5); opacity: 0; } }
+.intro-stage { position: relative; width: min(46vmin, 300px); aspect-ratio: 220/260; transform-origin: 30% 50%; animation: introDive 1.5s cubic-bezier(.65,0,.85,.2) 1.5s forwards; }
+.intro-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 10px 40px rgba(255,46,91,.35)); animation: introLogoOut .5s ease-in 2.05s forwards; }
+.b-stem { transform-box: fill-box; transform-origin: 50% 0; transform: scaleY(0); animation: bStem .55s cubic-bezier(.2,.8,.2,1) .15s forwards; }
+.b-shadow { transform-box: fill-box; transform-origin: 50% 0; transform: scaleY(0); animation: bStem .55s cubic-bezier(.2,.8,.2,1) .2s forwards; }
+.b-loop { stroke-dasharray: 100; stroke-dashoffset: 100; }
+.b-loop1 { animation: bDraw .6s cubic-bezier(.45,0,.2,1) .5s forwards; }
+.b-loop2 { animation: bDraw .65s cubic-bezier(.45,0,.2,1) .72s forwards; }
+.b-shine { animation: bShine .75s ease-in-out 1.15s forwards; }
+.intro-ribbons { position: absolute; left: 18%; width: 22%; top: 8%; bottom: 8%; pointer-events: none; }
+.intro-ribbons i { position: absolute; top: 0; bottom: 0; transform-origin: 50% 50%; animation: ribbon 1.3s cubic-bezier(.4,0,.6,1) forwards; mix-blend-mode: screen; }
+.intro-flash { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, rgba(255,46,91,.35), transparent 60%); opacity: 0; animation: introFlash 1s ease-out 2.2s forwards; pointer-events: none; }
+@keyframes bStem { to { transform: scaleY(1); } }
+@keyframes bDraw { to { stroke-dashoffset: 0; } }
+@keyframes bShine { from { transform: skewX(-18deg) translateX(0); } to { transform: skewX(-18deg) translateX(420px); } }
+@keyframes introDive { 0% { transform: scale(1); } 100% { transform: scale(28); } }
+@keyframes introLogoOut { to { opacity: 0; } }
+@keyframes ribbon { 0% { opacity: 0; transform: scaleY(.2); } 25% { opacity: 1; transform: scaleY(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: scaleY(1.4) scaleX(2.5); } }
+@keyframes introFlash { 0% { opacity: 0; } 40% { opacity: 1; } 100% { opacity: 0; } }
 
 /* Connexion : saisie fiable sur iPhone */
 .auth .input { -webkit-user-select: text; user-select: text; touch-action: manipulation; position: relative; z-index: 2; }
