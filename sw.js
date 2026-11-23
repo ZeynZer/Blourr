@@ -1,8 +1,8 @@
 // Service worker Blourr : garde l'appli disponible hors connexion (pour regarder les téléchargements).
 // Il ne touche qu'aux fichiers de l'appli : les vidéos et l'API passent directement par le réseau.
-const VERSION = 'blourr-v15';
+const VERSION = 'blourr-v16';
 const SHELL = [
-  './', './index.html', './manifest.webmanifest', './css/app.css?v=15', './js/main.js?v=15',
+  './', './index.html', './manifest.webmanifest', './css/app.css?v=16', './js/main.js?v=16',
   './js/api.js', './js/ui.js', './js/router.js', './js/auth.js', './js/gallery.js', './js/media.js', './js/catalog.js',
   './js/cine.js', './js/player.js', './js/studio.js', './js/profile.js', './js/intro.js', './js/family.js', './js/donate.js',
   './js/downloads.js', './js/dlworker.js', './js/vendor/supabase.js',

@@ -111,13 +111,22 @@ export const errToast = (e) => toast(typeof e === 'string' ? e : (e?.message || 
 export function sheet(build, { onClose } = {}) {
   const ov = h('div', { class: 'overlay' });
   const sh = h('div', { class: 'sheet' }, h('div', { class: 'grab' }));
-  const close = () => { ov.remove(); document.removeEventListener('keydown', esc); onClose && onClose(); };
+  let closed = false;
+  const close = () => {
+    if (closed) return; closed = true;
+    document.removeEventListener('keydown', esc);
+    sh.style.transition = 'transform .25s cubic-bezier(.2,.8,.2,1)'; sh.style.transform = 'translateY(100%)';
+    ov.style.transition = 'opacity .25s'; ov.style.opacity = '0';
+    setTimeout(() => ov.remove(), 240);
+    onClose && onClose();
+  };
   const esc = (e) => { if (e.key === 'Escape') close(); };
   ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
   document.addEventListener('keydown', esc);
   sh.append(...[].concat(build(close)));
   ov.append(sh);
   document.body.append(ov);
+  swipeToClose(sh, close, () => sh.scrollTop <= 0);
   return close;
 }
 
@@ -192,3 +201,36 @@ export function avatar(p, cls = '') {
 export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 export const ext = (name) => { const m = /\.([a-z0-9]{1,8})$/i.exec(name || ''); return m ? m[1].toLowerCase() : 'bin'; };
 export const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Glisser vers le bas pour fermer (feuilles, fiches) : suit le doigt puis ferme ou revient en place
+export function swipeToClose(el, close, atTop = () => true, { threshold = 110 } = {}) {
+  let y0 = 0, x0 = 0, dy = 0, t0 = 0, active = false, decided = false, dragging = false;
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    const grab = e.target.closest('.grab, .sheet-head');
+    if (!grab && !atTop()) return;
+    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; t0 = Date.now();
+    active = true; decided = false; dragging = false;
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (!active) return;
+    const d = e.touches[0].clientY - y0; const dx = e.touches[0].clientX - x0;
+    if (!decided) {
+      if (Math.abs(d) < 6 && Math.abs(dx) < 6) return;
+      decided = true;
+      dragging = d > 0 && Math.abs(d) > Math.abs(dx) && atTop();
+      if (!dragging) { active = false; return; }
+      el.style.transition = 'none';
+    }
+    dy = Math.max(0, d);
+    el.style.transform = `translateY(${dy}px)`;
+    if (e.cancelable) e.preventDefault(); // empêche l'effet élastique d'iOS pendant le glissé
+  }, { passive: false });
+  el.addEventListener('touchend', () => {
+    if (!active || !dragging) { active = false; return; }
+    active = false;
+    const fast = dy > 40 && dy / Math.max(1, Date.now() - t0) > 0.6;
+    if (dy > threshold || fast) close();
+    else { el.style.transition = 'transform .25s cubic-bezier(.2,.8,.2,1)'; el.style.transform = ''; }
+  });
+}

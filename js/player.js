@@ -1,7 +1,7 @@
 import { h, icon, clock, sheet, errToast, toast, runtime } from './ui.js';
 import { sb, signedUrl, freshUrl, lazyImg } from './api.js';
 import { releaseAudio } from './intro.js';
-import { localSources, setLocalProgress } from './downloads.js';
+import { localSources, setLocalProgress, downloadButton, supported as dlSupported } from './downloads.js';
 import { uid } from './ui.js';
 import { episodesOf, nextEpisode, saveProgress, progressOf, ratio } from './catalog.js';
 
@@ -414,7 +414,8 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
         const p = ratio(progressOf(e.id));
         return h('div', { class: 'ep' + (ep && e.id === ep.id ? ' current' : ''), onclick: () => { close(); persist(); load(e, p < 0.95 && progressOf(e.id) ? progressOf(e.id).position : 0); } },
           h('div', { class: 'th' }, lazyImg(e.thumb_key || t.backdrop_key, { eager: true }), p > 0.01 ? h('div', { class: 'prog' }, h('i', { style: { width: p * 100 + '%' } })) : null),
-          h('div', { class: 'ei' }, h('div', { class: 't' }, `${e.number}. ${e.name || 'Épisode ' + e.number}`, h('span', {}, runtime(e.duration)))));
+          h('div', { class: 'ei' }, h('div', { class: 't' }, `${e.number}. ${e.name || 'Épisode ' + e.number}`), h('p', {}, runtime(e.duration))),
+          dlSupported() ? downloadButton(t, e, { compact: true }) : null);
       }));
       draw();
       return [h('h2', {}, t.name),

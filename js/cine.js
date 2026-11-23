@@ -1,4 +1,4 @@
-import { h, icon, errToast, toast, runtime, avatar, confirmBox, dateFr } from './ui.js';
+import { h, icon, errToast, toast, runtime, avatar, confirmBox, dateFr, swipeToClose } from './ui.js';
 import { sb, state, lazyImg, bgInto } from './api.js';
 import { cat, loadCatalog, titleById, sagaById, episodesOf, sagaTitles, progressOf, ratio, resumeTarget, continueWatching, toggleList, toggleFav, isPlayable } from './catalog.js';
 import { openPlayer } from './player.js';
@@ -254,6 +254,7 @@ export async function openDetail(id) {
   ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
   document.body.style.overflow = 'hidden';
   document.body.append(ov);
+  swipeToClose(d, () => close(), () => ov.scrollTop <= 0);
 
   function render() {
     const target = resumeTarget(t);
@@ -342,9 +343,10 @@ function episodesBlock(t, closeDetail) {
           h('div', { class: 'pi' }, h('span', {}, icon('play'))),
           p > 0.01 ? h('div', { class: 'prog' }, h('i', { style: { width: p * 100 + '%' } })) : null),
         h('div', { class: 'ei' },
-          h('div', { class: 't' }, `${e.number}. ${e.name || 'Épisode ' + e.number}`, h('span', { class: 'ep-r' }, runtime(e.duration), e.video_key && dlSupported() ? downloadButton(t, e, { compact: true }) : null)),
+          h('div', { class: 't' }, `${e.number}. ${e.name || 'Épisode ' + e.number}`, h('span', {}, runtime(e.duration))),
           e.description ? h('p', {}, e.description) : null,
-          !e.video_key ? h('p', { style: { color: '#f59e0b' } }, 'Vidéo manquante') : null));
+          !e.video_key ? h('p', { style: { color: '#f59e0b' } }, 'Vidéo manquante') : null),
+        e.video_key && dlSupported() ? downloadButton(t, e, { compact: true }) : null);
     }));
   }
   draw();
