@@ -89,6 +89,31 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     setTimeout(() => { recovering = false; }, 4000);
   }
   // Palier 2 : démarrer sans le son (l'iPhone en mode appli bloque parfois le départ à cause du son), puis le remettre
+  let tuCount = 0; let audioCheckT = null;
+  const soundBtn = h('button', { class: 'sound-unlock hidden', onclick: (e) => { e.stopPropagation(); enableSound(); } }, icon('volume'), 'Activer le son');
+  function audioBlocked() {
+    mutedTrick = true;
+    video.muted = true;
+    video.play().catch(() => {});
+    soundBtn.classList.remove('hidden');
+  }
+  root.append(soundBtn);
+  function enableSound() {
+    // pendant le toucher : on redemande la main sur le son à iOS
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* rien */ }
+    const t0 = video.currentTime; const tu0 = tuCount;
+    video.muted = false;
+    video.play().catch(() => {});
+    soundBtn.classList.add('hidden');
+    setTimeout(() => {
+      if (closed) return;
+      if (tuCount === tu0 || Math.abs(video.currentTime - t0) < 0.2) {
+        video.muted = true; video.play().catch(() => {});
+        soundBtn.classList.remove('hidden');
+        toast('iOS bloque encore le son : ferme complètement l\'appli (balaye-la vers le haut) puis rouvre-la.', 'err');
+      }
+    }, 2000);
+  }
   let mutedTrick = false;
   function tryMuted() {
     mutedTrick = true; retries++;
@@ -269,7 +294,18 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
 
   // ---------- Événements vidéo ----------
   video.addEventListener('waiting', () => loading.classList.remove('hidden'));
-  video.addEventListener('playing', () => { loading.classList.add('hidden'); showUI(); });
+  video.addEventListener('playing', () => {
+    loading.classList.add('hidden'); showUI();
+    // iOS (appli installée) : si le son de l'iPhone est « bloqué » (ex. après YouTube, Spotify, un appel),
+    // la vidéo dit jouer mais son horloge ne bouge pas. On la relance alors sans le son, puis on propose de le réactiver.
+    const tStart = video.currentTime; const tu0 = tuCount;
+    clearTimeout(audioCheckT);
+    audioCheckT = setTimeout(() => {
+      if (closed || video.paused || video.muted) return;
+      if (tuCount === tu0 && Math.abs(video.currentTime - tStart) < 0.05) audioBlocked();
+    }, 2500);
+  });
+  video.addEventListener('timeupdate', () => { tuCount++; });
   video.addEventListener('canplay', () => loading.classList.add('hidden'));
   video.addEventListener('play', () => { ppBtn.replaceChildren(icon('pause')); showUI(); });
   video.addEventListener('pause', () => { ppBtn.replaceChildren(icon('play')); showUI(true); persist(); });
@@ -431,6 +467,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     flushSession();
     clearInterval(tick);
     clearInterval(watchdog);
+    clearTimeout(audioCheckT);
     clearCountdown();
     // libère complètement le lecteur vidéo de l'iPhone (sinon il reste occupé et bloque les vidéos suivantes)
     releaseVideo(video);
