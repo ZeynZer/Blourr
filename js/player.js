@@ -195,6 +195,10 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   const LANG_NAMES = { fr: 'Français', fre: 'Français', fra: 'Français', en: 'Anglais', eng: 'Anglais', ja: 'Japonais', jpn: 'Japonais', es: 'Espagnol', spa: 'Espagnol', ar: 'Arabe', ara: 'Arabe', de: 'Allemand', ger: 'Allemand', deu: 'Allemand', it: 'Italien', ita: 'Italien', ko: 'Coréen', kor: 'Coréen' };
   const trackName = (tr, i) => LANG_NAMES[(tr.language || '').toLowerCase()] || tr.label || `Piste ${i + 1}`;
   const tracks = () => (video.audioTracks ? [...video.audioTracks] : []);
+  if (video.audioTracks) {
+    video.audioTracks.addEventListener('addtrack', () => setupLanguages());
+    video.audioTracks.addEventListener('removetrack', () => setupLanguages());
+  }
   function currentTrack() { return tracks().findIndex((t) => t.enabled); }
   function selectTrack(i) {
     tracks().forEach((t, j) => { t.enabled = j === i; });
@@ -204,7 +208,9 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   }
   function setupLanguages() {
     const list = tracks();
-    langBtn.classList.toggle('hidden', list.length < 2);
+    // Bouton toujours visible quand le navigateur sait changer de piste (Safari / iPhone)
+    langBtn.classList.toggle('hidden', !video.audioTracks);
+    if (list.length === 1) langBtn.lastChild.textContent = trackName(list[0], 0);
     if (list.length < 2) return;
     let pref = null;
     try { pref = localStorage.getItem('blourr-lang'); } catch { /* rien */ }
@@ -218,6 +224,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     const cur = currentTrack();
     sheet((close) => [
       h('h2', {}, 'Langue'),
+      list.length < 2 ? h('p', { class: 'muted', style: { marginTop: '-6px' } }, ep ? 'Cet épisode n\'existe qu\'en une seule langue.' : 'Ce film n\'existe qu\'en une seule langue.') : null,
       list.map((t, i) => h('button', { class: 'list-btn', onclick: () => { selectTrack(i); close(); } },
         icon(i === cur ? 'check' : 'volume'), trackName(t, i))),
     ]);
