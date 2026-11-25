@@ -3,6 +3,7 @@ import { sb, signedUrl, freshUrl, lazyImg } from './api.js';
 import { releaseAudio } from './intro.js';
 import { localSources, setLocalProgress, downloadButton, supported as dlSupported } from './downloads.js';
 import { uid } from './ui.js';
+import { probeTracks, msePlay, mseSupported } from './mselang.js';
 import { episodesOf, nextEpisode, saveProgress, progressOf, ratio } from './catalog.js';
 
 const SPEEDS = [1, 1.25, 1.5, 0.75];
@@ -76,7 +77,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   // ---------- Anti-blocage : si l'image ne progresse plus, on recharge la vidéo au même endroit ----------
   let lastT = -1; let stuck = 0; let recovering = false; let retries = 0;
   async function recover(reason) {
-    if (recovering || closed || retries >= 3) return;
+    if (recovering || closed || retries >= 3 || Date.now() < langSwitchUntil) return;
     recovering = true; retries++;
     const at = video.currentTime || 0;
     const wasPlaying = !video.paused;
@@ -84,6 +85,14 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     try {
       const local = isLocal ? await localSources(cur().id) : null;
       const src = local ? local.video : await freshUrl(cur().video_key);
+      curSrc = src;
+      if (mse) {
+        stopMse();
+        mse = msePlay(video, src, mseInfo.audio[mseIdx].id, at);
+        if (wasPlaying || reason === 'stall') video.play().catch(() => showUI(true));
+        setTimeout(() => { recovering = false; }, 4000);
+        return;
+      }
       video.src = src;
       video.addEventListener('loadedmetadata', () => { if (at > 1) video.currentTime = at; setupLanguages(); setSubs(subsOn); }, { once: true });
       if (wasPlaying || reason === 'stall') video.play().catch(() => showUI(true));
@@ -176,7 +185,9 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
         tr.addEventListener('load', () => setSubs(subsOn));
       } else video.removeAttribute('crossorigin');
       startAt = from > 5 ? from : 0;
+      stopMse(); curSrc = src;
       video.src = startAt && !isLocal ? `${src}#t=${Math.floor(startAt)}` : src;
+      probeLanguages(src);
       video.load();
       video.playbackRate = SPEEDS[speedIdx];
       video.addEventListener('loadedmetadata', () => {
@@ -194,22 +205,70 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   // ---------- Langues (pistes audio multiples, lues par Safari / iPhone) ----------
   const LANG_NAMES = { fr: 'Français', fre: 'Français', fra: 'Français', en: 'Anglais', eng: 'Anglais', ja: 'Japonais', jpn: 'Japonais', es: 'Espagnol', spa: 'Espagnol', ar: 'Arabe', ara: 'Arabe', de: 'Allemand', ger: 'Allemand', deu: 'Allemand', it: 'Italien', ita: 'Italien', ko: 'Coréen', kor: 'Coréen' };
   const trackName = (tr, i) => LANG_NAMES[(tr.language || '').toLowerCase()] || tr.label || `Piste ${i + 1}`;
-  const tracks = () => (video.audioTracks ? [...video.audioTracks] : []);
-  if (video.audioTracks) {
+  // Safari / iPhone : le navigateur change lui-même de piste. Ailleurs (Chrome, Edge, Firefox) : Media Source (mselang.js)
+  const native = !!video.audioTracks;
+  let langSwitchUntil = 0;
+  let mse = null; let mseInfo = null; let mseIdx = 0; let curSrc = null; let probeGen = 0;
+  const tracks = () => (native ? [...video.audioTracks] : (mseInfo?.audio || []));
+  if (native) {
     video.audioTracks.addEventListener('addtrack', () => setupLanguages());
     video.audioTracks.addEventListener('removetrack', () => setupLanguages());
   }
-  function currentTrack() { return tracks().findIndex((t) => t.enabled); }
+  function currentTrack() { return native ? tracks().findIndex((t) => t.enabled) : mseIdx; }
+  function rememberLang(t) { try { localStorage.setItem('blourr-lang', (t.language || '').toLowerCase()); } catch { /* rien */ } }
   function selectTrack(i) {
-    tracks().forEach((t, j) => { t.enabled = j === i; });
     const t = tracks()[i];
-    try { localStorage.setItem('blourr-lang', (t.language || '').toLowerCase()); } catch { /* rien */ }
+    if (!t) return;
+    if (native) tracks().forEach((x, j) => { x.enabled = j === i; });
+    else switchMse(i);
+    rememberLang(t);
     langBtn.lastChild.textContent = trackName(t, i);
   }
+  function stopMse() { mse?.destroy(); mse = null; }
+  function switchMse(i) {
+    if (i === mseIdx || !mseInfo || !curSrc) return;
+    const at = video.currentTime || startAt || 0;
+    const playing = !video.paused;
+    stopMse();
+    mseIdx = i;
+    langSwitchUntil = Date.now() + 8000; // pas d'anti-blocage pendant le changement
+    loading.classList.remove('hidden');
+    if (i === 0) {
+      video.src = curSrc;
+      video.addEventListener('loadedmetadata', () => { if (at > 1) video.currentTime = at; setSubs(subsOn); }, { once: true });
+      video.addEventListener('canplay', () => { if (at > 1 && Math.abs(video.currentTime - at) > 2) video.currentTime = at; }, { once: true });
+    } else {
+      mse = msePlay(video, curSrc, mseInfo.audio[i].id, at, { onError: () => {
+        toast('Impossible de changer de langue sur ce navigateur');
+        mseIdx = -1; switchMse(0); langBtn.lastChild.textContent = trackName(mseInfo.audio[0], 0);
+      } });
+    }
+    if (playing) video.play().catch(() => showUI(true));
+  }
+  // PC : on lit le début du fichier pour connaître ses langues
+  function probeLanguages(src) {
+    const gen = ++probeGen;
+    mseInfo = null; mseIdx = 0;
+    langBtn.classList.add('hidden');
+    if (native || !mseSupported()) return;
+    probeTracks(src).then((info) => {
+      if (gen !== probeGen || closed || !info?.audio.length) return;
+      mseInfo = info;
+      langBtn.classList.remove('hidden');
+      const list = info.audio;
+      let pref = null;
+      try { pref = localStorage.getItem('blourr-lang'); } catch { /* rien */ }
+      const same = (a, b) => (LANG_NAMES[a] || a) === (LANG_NAMES[b] || b);
+      const i = pref && list.length > 1 ? list.findIndex((t) => same(t.language, pref)) : -1;
+      if (i > 0) selectTrack(i);
+      else langBtn.lastChild.textContent = trackName(list[0], 0);
+    }).catch((e) => console.warn('[langue] analyse impossible', e));
+  }
   function setupLanguages() {
+    if (!native) return;
     const list = tracks();
     // Bouton toujours visible quand le navigateur sait changer de piste (Safari / iPhone)
-    langBtn.classList.toggle('hidden', !video.audioTracks);
+    langBtn.classList.remove('hidden');
     if (list.length === 1) langBtn.lastChild.textContent = trackName(list[0], 0);
     if (list.length < 2) return;
     let pref = null;
@@ -252,12 +311,14 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
     if (!stay && !video.paused) hideT = setTimeout(() => root.classList.add('idle'), 3200);
   }
   let lastTap = 0; let tapT = null;
+  const mouse = matchMedia('(hover: hover) and (pointer: fine)');
   root.addEventListener('click', (e) => {
     if (e.target !== video && e.target !== ui && !e.target.classList.contains('pl-mid')) return;
     const now = Date.now();
     const x = e.clientX / window.innerWidth;
     if (now - lastTap < 280) { // double tap
       clearTimeout(tapT); lastTap = 0;
+      if (mouse.matches) { fullscreen(); return; } // ordinateur : double clic = plein écran
       if (x < 0.38) seekBy(-10); else if (x > 0.62) seekBy(10); else toggle();
       return;
     }
@@ -476,6 +537,7 @@ export function openPlayer({ title: t, episode = null, start = 0, onExit = null 
   function exit() {
     if (closed) return;
     closed = true;
+    stopMse();
     persist();
     flushSession();
     clearInterval(tick);
